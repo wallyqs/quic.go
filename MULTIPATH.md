@@ -76,19 +76,28 @@ packet number spaces all assume a single active path.
     paths until the scheduler exists (Phase 5). This is the integration point.
 
 - **Phase 5 — packet scheduler + send loop (IN PROGRESS).**
-  - `selectSendablePaths` (`path_scheduler.go`) is the throughput scheduling
-    policy: stripe across every validated, congestion-window-open "available"
-    path; fall back to "backup" paths only when no available path can send.
-    Pure and fully unit-tested (`path_scheduler_test.go`).
-  - REMAINING (the big integration): thread `PathID` through the
-    `SentPacketHandler` interface (`SentPacket`, `ReceivedAck`, `SendMode`,
-    `Peek`/`PopPacketNumber`, loss-detection timers) and the send loop in
-    `connection.go`, so the loop iterates over `selectSendablePaths`, packs a
-    packet per path with that path's connection ID, and routes received ACKs to
-    the per-path congestion controller. Also: receive-side demux of incoming
-    packets to their path. This step changes the mock and many call sites, and
-    needs real multi-path network validation (cannot be exercised in CI / this
-    sandbox).
+  - `selectSendablePaths` (`path_scheduler.go`): throughput scheduling policy.
+    Pure and fully unit-tested.
+  - Path-aware packet number API landed: `PeekPacketNumberForPath` /
+    `PopPacketNumberForPath` on the `SentPacketHandler` interface (mock
+    regenerated), implemented against the per-path packet number space, with
+    path-0 equivalence tested.
+  - REMAINING (the big, unvalidatable-in-CI integration):
+    1. `packetPacker`: a path-aware 1-RTT data-packing method (pack with a
+       given path's connection ID + packet number, assigning stream/control
+       frames to the path). Today only `PackPathProbePacket(connID, frames)`
+       packs for a specific connection ID, and it uses the default path's PN.
+    2. `SentPacketHandler`: per-path `SentPacket` recording and per-path
+       `SendMode` (consult that path's congestion controller / bytes-in-flight).
+    3. `connection.go` send loop: iterate `selectSendablePaths`, pack a packet
+       per path, write it to that path's transport socket.
+    4. Receive side: demux incoming packets to their path and route ACKs to the
+       per-path congestion controller (in our quic-go-only design, the path is
+       identified by the local connection ID the packet arrived on).
+    5. Public API (phase 6) to open + activate additional paths simultaneously
+       (today `Path.Switch()` is an exclusive hand-off).
+    This needs real multi-path network validation (AWS), so it is being wired
+    slice by slice rather than as one blind rewrite of the send path.
 
 - **Phase 6 — public API + validation.** Expose adding/activating paths; test
   aggregate throughput across two paths.
