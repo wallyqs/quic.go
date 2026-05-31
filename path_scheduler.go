@@ -1,6 +1,10 @@
 package quic
 
-import "slices"
+import (
+	"slices"
+
+	"github.com/quic-go/quic-go/internal/ackhandler"
+)
 
 // pathStatus is the multipath status of a path, as signaled by the
 // PATH_AVAILABLE / PATH_BACKUP frames.
@@ -17,7 +21,7 @@ const (
 // schedulablePath is the scheduler's view of a path: its ID, whether it is a
 // backup path, and whether its congestion controller currently allows sending.
 type schedulablePath struct {
-	id        pathID
+	id        ackhandler.PathID
 	status    pathStatus
 	canSend   bool // the path's congestion window has room for another packet
 	validated bool // path validation (PATH_CHALLENGE/RESPONSE) has completed
@@ -37,8 +41,8 @@ type schedulablePath struct {
 // The returned slice is ordered by path ID for determinism, and is empty if no
 // path can currently send (the caller should then wait for an ACK or the
 // congestion window to open up).
-func selectSendablePaths(paths []schedulablePath) []pathID {
-	var available, backup []pathID
+func selectSendablePaths(paths []schedulablePath) []ackhandler.PathID {
+	var available, backup []ackhandler.PathID
 	for _, p := range paths {
 		if !p.validated || !p.canSend {
 			continue

@@ -3,6 +3,7 @@ package quic
 import (
 	"testing"
 
+	"github.com/quic-go/quic-go/internal/ackhandler"
 	"github.com/stretchr/testify/require"
 )
 
@@ -14,7 +15,7 @@ func TestSelectSendablePathsStripesAcrossAvailablePaths(t *testing.T) {
 		{id: 1, status: pathStatusAvailable, canSend: true, validated: true},
 		{id: 2, status: pathStatusAvailable, canSend: true, validated: true},
 	}
-	require.Equal(t, []pathID{0, 1, 2}, selectSendablePaths(paths))
+	require.Equal(t, []ackhandler.PathID{0, 1, 2}, selectSendablePaths(paths))
 }
 
 func TestSelectSendablePathsSkipsBlockedAndUnvalidated(t *testing.T) {
@@ -23,7 +24,7 @@ func TestSelectSendablePathsSkipsBlockedAndUnvalidated(t *testing.T) {
 		{id: 1, status: pathStatusAvailable, canSend: false, validated: true}, // congestion-limited
 		{id: 2, status: pathStatusAvailable, canSend: true, validated: false}, // not yet validated
 	}
-	require.Equal(t, []pathID{0}, selectSendablePaths(paths))
+	require.Equal(t, []ackhandler.PathID{0}, selectSendablePaths(paths))
 }
 
 func TestSelectSendablePathsFallsBackToBackup(t *testing.T) {
@@ -33,7 +34,7 @@ func TestSelectSendablePathsFallsBackToBackup(t *testing.T) {
 		{id: 1, status: pathStatusBackup, canSend: true, validated: true},
 		{id: 2, status: pathStatusBackup, canSend: true, validated: true},
 	}
-	require.Equal(t, []pathID{1, 2}, selectSendablePaths(paths))
+	require.Equal(t, []ackhandler.PathID{1, 2}, selectSendablePaths(paths))
 }
 
 func TestSelectSendablePathsPrefersAvailableOverBackup(t *testing.T) {
@@ -43,7 +44,7 @@ func TestSelectSendablePathsPrefersAvailableOverBackup(t *testing.T) {
 		{id: 0, status: pathStatusAvailable, canSend: true, validated: true},
 		{id: 1, status: pathStatusBackup, canSend: true, validated: true},
 	}
-	require.Equal(t, []pathID{0}, selectSendablePaths(paths))
+	require.Equal(t, []ackhandler.PathID{0}, selectSendablePaths(paths))
 }
 
 func TestSelectSendablePathsNoneAvailable(t *testing.T) {
