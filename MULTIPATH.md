@@ -82,19 +82,26 @@ packet number spaces all assume a single active path.
     `PopPacketNumberForPath` on the `SentPacketHandler` interface (mock
     regenerated), implemented against the per-path packet number space, with
     path-0 equivalence tested.
+  - Per-path send + ACK accounting landed: `SentPacketForPath`,
+    `SendModeForPath` and `ReceivedAckForPath` on the interface. For additional
+    paths these record/ack against the path's own packet number space,
+    congestion controller, RTT estimator and bytes-in-flight, including
+    self-contained per-path loss detection (`sent_packet_handler_multipath.go`).
+    The initial path delegates to the existing single-path methods, so its
+    behavior is unchanged. White-box tested (send → ACK → bytes-in-flight drains,
+    independent per-path RTT).
   - REMAINING (the big, unvalidatable-in-CI integration):
     1. `packetPacker`: a path-aware 1-RTT data-packing method (pack with a
        given path's connection ID + packet number, assigning stream/control
        frames to the path). Today only `PackPathProbePacket(connID, frames)`
        packs for a specific connection ID, and it uses the default path's PN.
-    2. `SentPacketHandler`: per-path `SentPacket` recording and per-path
-       `SendMode` (consult that path's congestion controller / bytes-in-flight).
-    3. `connection.go` send loop: iterate `selectSendablePaths`, pack a packet
-       per path, write it to that path's transport socket.
-    4. Receive side: demux incoming packets to their path and route ACKs to the
-       per-path congestion controller (in our quic-go-only design, the path is
-       identified by the local connection ID the packet arrived on).
-    5. Public API (phase 6) to open + activate additional paths simultaneously
+    2. `connection.go` send loop: iterate `selectSendablePaths`, pack a packet
+       per path via the packer, write it to that path's transport socket, and
+       call `SentPacketForPath`.
+    3. Receive side: demux incoming packets to their path and call
+       `ReceivedAckForPath` (in our quic-go-only design, the path is identified
+       by the local connection ID the packet arrived on).
+    4. Public API (phase 6) to open + activate additional paths simultaneously
        (today `Path.Switch()` is an exclusive hand-off).
     This needs real multi-path network validation (AWS), so it is being wired
     slice by slice rather than as one blind rewrite of the send path.

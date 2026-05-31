@@ -16,6 +16,9 @@ type SentPacketHandler interface {
 	// ReceivedAck processes an ACK frame.
 	// It does not store a copy of the frame.
 	ReceivedAck(f *wire.AckFrame, encLevel protocol.EncryptionLevel, rcvTime monotime.Time) (bool /* 1-RTT packet acked */, error)
+	// ReceivedAckForPath processes a 1-RTT ACK frame received for a specific path
+	// (multipath). For PathID InitialPathID it is equivalent to ReceivedAck.
+	ReceivedAckForPath(f *wire.AckFrame, id PathID, rcvTime monotime.Time) (bool /* packet acked */, error)
 	ReceivedPacket(protocol.EncryptionLevel, monotime.Time)
 	ReceivedBytes(_ protocol.ByteCount, rcvTime monotime.Time)
 	DropPackets(_ protocol.EncryptionLevel, rcvTime monotime.Time)

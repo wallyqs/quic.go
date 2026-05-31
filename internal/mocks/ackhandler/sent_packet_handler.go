@@ -460,6 +460,45 @@ func (c *MockSentPacketHandlerReceivedAckCall) DoAndReturn(f func(*wire.AckFrame
 	return c
 }
 
+// ReceivedAckForPath mocks base method.
+func (m *MockSentPacketHandler) ReceivedAckForPath(f *wire.AckFrame, id ackhandler.PathID, rcvTime monotime.Time) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReceivedAckForPath", f, id, rcvTime)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ReceivedAckForPath indicates an expected call of ReceivedAckForPath.
+func (mr *MockSentPacketHandlerMockRecorder) ReceivedAckForPath(f, id, rcvTime any) *MockSentPacketHandlerReceivedAckForPathCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReceivedAckForPath", reflect.TypeOf((*MockSentPacketHandler)(nil).ReceivedAckForPath), f, id, rcvTime)
+	return &MockSentPacketHandlerReceivedAckForPathCall{Call: call}
+}
+
+// MockSentPacketHandlerReceivedAckForPathCall wrap *gomock.Call
+type MockSentPacketHandlerReceivedAckForPathCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSentPacketHandlerReceivedAckForPathCall) Return(arg0 bool, arg1 error) *MockSentPacketHandlerReceivedAckForPathCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSentPacketHandlerReceivedAckForPathCall) Do(f func(*wire.AckFrame, ackhandler.PathID, monotime.Time) (bool, error)) *MockSentPacketHandlerReceivedAckForPathCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSentPacketHandlerReceivedAckForPathCall) DoAndReturn(f func(*wire.AckFrame, ackhandler.PathID, monotime.Time) (bool, error)) *MockSentPacketHandlerReceivedAckForPathCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // ReceivedBytes mocks base method.
 func (m *MockSentPacketHandler) ReceivedBytes(arg0 protocol.ByteCount, rcvTime monotime.Time) {
 	m.ctrl.T.Helper()

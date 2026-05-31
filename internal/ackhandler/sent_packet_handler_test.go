@@ -1884,3 +1884,43 @@ func TestSentPacketHandlerSentPacketForPath(t *testing.T) {
 	// an unknown path cannot send
 	require.Equal(t, SendNone, h.SendModeForPath(99, now))
 }
+
+func TestSentPacketHandlerReceivedAckForPath(t *testing.T) {
+	sph := NewSentPacketHandler(
+		0, 1200, utils.NewRTTStats(), &utils.ConnectionStats{},
+		false, false, nil, protocol.PerspectiveClient, nil, utils.DefaultLogger,
+	)
+	h := sph.(*sentPacketHandler)
+	h.addPath(1)
+
+	var packets packetTracker
+	now := monotime.Now()
+
+	// send 3 ack-eliciting packets on path 1
+	var pns []protocol.PacketNumber
+	for range 3 {
+		pn := h.PopPacketNumberForPath(1)
+		h.SentPacketForPath(1, now, pn, protocol.InvalidPacketNumber, nil, []Frame{packets.NewPingFrame(pn)}, protocol.ECNNon, 1000, false)
+		pns = append(pns, pn)
+	}
+	require.Equal(t, protocol.ByteCount(3000), h.appDataPath(1).bytesInFlight)
+
+	// ack all three on path 1, 50ms later
+	acked, err := h.ReceivedAckForPath(
+		&wire.AckFrame{AckRanges: ackRanges(pns[0], pns[1], pns[2])},
+		1,
+		now.Add(50*time.Millisecond),
+	)
+	require.NoError(t, err)
+	require.True(t, acked)
+	// path 1's bytes-in-flight drains and its history is empty
+	require.Zero(t, h.appDataPath(1).bytesInFlight)
+	require.Zero(t, h.appDataPath(1).space.history.Len())
+	// path 1's RTT was updated; the initial path's RTT is untouched
+	require.Equal(t, 50*time.Millisecond, h.appDataPath(1).rttStats.SmoothedRTT())
+	require.NotEqual(t, h.appDataPath(1).rttStats.SmoothedRTT(), h.rttStats.SmoothedRTT())
+
+	// an ACK for an unsent packet number on the path is a protocol violation
+	_, err = h.ReceivedAckForPath(&wire.AckFrame{AckRanges: ackRanges(99)}, 1, now)
+	require.Error(t, err)
+}
