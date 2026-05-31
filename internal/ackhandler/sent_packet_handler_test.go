@@ -1828,3 +1828,30 @@ func TestSentPacketHandlerPerPathPacketNumberSpaces(t *testing.T) {
 	h.removePath(1)
 	require.Nil(t, h.appDataPath(1))
 }
+
+func TestSentPacketHandlerPerPathPacketNumbers(t *testing.T) {
+	sph := NewSentPacketHandler(
+		0, 1200, utils.NewRTTStats(), &utils.ConnectionStats{},
+		false, false, nil, protocol.PerspectiveClient, nil, utils.DefaultLogger,
+	)
+	h := sph.(*sentPacketHandler)
+
+	// for the initial path, the path-aware API matches the 1-RTT API
+	peek0, len0 := h.PeekPacketNumberForPath(InitialPathID)
+	peek1RTT, len1RTT := h.PeekPacketNumber(protocol.Encryption1RTT)
+	require.Equal(t, peek1RTT, peek0)
+	require.Equal(t, len1RTT, len0)
+
+	// an unknown path falls back to the initial path
+	peekUnknown, _ := h.PeekPacketNumberForPath(42)
+	require.Equal(t, peek0, peekUnknown)
+
+	// a second path has its own, independent packet number sequence
+	h.addPath(1)
+	pn := h.PopPacketNumberForPath(1)
+	nextPath1, _ := h.PeekPacketNumberForPath(1)
+	require.Equal(t, pn+1, nextPath1)
+	// popping on path 1 doesn't advance the initial path
+	stillPeek0, _ := h.PeekPacketNumberForPath(InitialPathID)
+	require.Equal(t, peek0, stillPeek0)
+}

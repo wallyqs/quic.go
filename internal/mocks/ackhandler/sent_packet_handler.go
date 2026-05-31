@@ -268,6 +268,45 @@ func (c *MockSentPacketHandlerPeekPacketNumberCall) DoAndReturn(f func(protocol.
 	return c
 }
 
+// PeekPacketNumberForPath mocks base method.
+func (m *MockSentPacketHandler) PeekPacketNumberForPath(arg0 ackhandler.PathID) (protocol.PacketNumber, protocol.PacketNumberLen) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PeekPacketNumberForPath", arg0)
+	ret0, _ := ret[0].(protocol.PacketNumber)
+	ret1, _ := ret[1].(protocol.PacketNumberLen)
+	return ret0, ret1
+}
+
+// PeekPacketNumberForPath indicates an expected call of PeekPacketNumberForPath.
+func (mr *MockSentPacketHandlerMockRecorder) PeekPacketNumberForPath(arg0 any) *MockSentPacketHandlerPeekPacketNumberForPathCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PeekPacketNumberForPath", reflect.TypeOf((*MockSentPacketHandler)(nil).PeekPacketNumberForPath), arg0)
+	return &MockSentPacketHandlerPeekPacketNumberForPathCall{Call: call}
+}
+
+// MockSentPacketHandlerPeekPacketNumberForPathCall wrap *gomock.Call
+type MockSentPacketHandlerPeekPacketNumberForPathCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSentPacketHandlerPeekPacketNumberForPathCall) Return(arg0 protocol.PacketNumber, arg1 protocol.PacketNumberLen) *MockSentPacketHandlerPeekPacketNumberForPathCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSentPacketHandlerPeekPacketNumberForPathCall) Do(f func(ackhandler.PathID) (protocol.PacketNumber, protocol.PacketNumberLen)) *MockSentPacketHandlerPeekPacketNumberForPathCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSentPacketHandlerPeekPacketNumberForPathCall) DoAndReturn(f func(ackhandler.PathID) (protocol.PacketNumber, protocol.PacketNumberLen)) *MockSentPacketHandlerPeekPacketNumberForPathCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // PopPacketNumber mocks base method.
 func (m *MockSentPacketHandler) PopPacketNumber(arg0 protocol.EncryptionLevel) protocol.PacketNumber {
 	m.ctrl.T.Helper()
@@ -302,6 +341,44 @@ func (c *MockSentPacketHandlerPopPacketNumberCall) Do(f func(protocol.Encryption
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockSentPacketHandlerPopPacketNumberCall) DoAndReturn(f func(protocol.EncryptionLevel) protocol.PacketNumber) *MockSentPacketHandlerPopPacketNumberCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// PopPacketNumberForPath mocks base method.
+func (m *MockSentPacketHandler) PopPacketNumberForPath(arg0 ackhandler.PathID) protocol.PacketNumber {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PopPacketNumberForPath", arg0)
+	ret0, _ := ret[0].(protocol.PacketNumber)
+	return ret0
+}
+
+// PopPacketNumberForPath indicates an expected call of PopPacketNumberForPath.
+func (mr *MockSentPacketHandlerMockRecorder) PopPacketNumberForPath(arg0 any) *MockSentPacketHandlerPopPacketNumberForPathCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PopPacketNumberForPath", reflect.TypeOf((*MockSentPacketHandler)(nil).PopPacketNumberForPath), arg0)
+	return &MockSentPacketHandlerPopPacketNumberForPathCall{Call: call}
+}
+
+// MockSentPacketHandlerPopPacketNumberForPathCall wrap *gomock.Call
+type MockSentPacketHandlerPopPacketNumberForPathCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSentPacketHandlerPopPacketNumberForPathCall) Return(arg0 protocol.PacketNumber) *MockSentPacketHandlerPopPacketNumberForPathCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSentPacketHandlerPopPacketNumberForPathCall) Do(f func(ackhandler.PathID) protocol.PacketNumber) *MockSentPacketHandlerPopPacketNumberForPathCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSentPacketHandlerPopPacketNumberForPathCall) DoAndReturn(f func(ackhandler.PathID) protocol.PacketNumber) *MockSentPacketHandlerPopPacketNumberForPathCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

@@ -1016,6 +1016,35 @@ func (h *sentPacketHandler) PopPacketNumber(encLevel protocol.EncryptionLevel) p
 	return pn
 }
 
+// pathOrInitial returns the per-path state for id, falling back to the initial
+// path if id is unknown.
+func (h *sentPacketHandler) pathOrInitial(id PathID) *pathState {
+	if ps, ok := h.appDataPaths[id]; ok {
+		return ps
+	}
+	return h.appDataPaths[InitialPathID]
+}
+
+func (h *sentPacketHandler) PeekPacketNumberForPath(id PathID) (protocol.PacketNumber, protocol.PacketNumberLen) {
+	pnSpace := h.pathOrInitial(id).space
+	pn := pnSpace.pns.Peek()
+	// See section 17.1 of RFC 9000.
+	return pn, protocol.PacketNumberLengthForHeader(pn, pnSpace.largestAcked)
+}
+
+func (h *sentPacketHandler) PopPacketNumberForPath(id PathID) protocol.PacketNumber {
+	pnSpace := h.pathOrInitial(id).space
+	skipped, pn := pnSpace.pns.Pop()
+	if skipped {
+		skippedPN := pn - 1
+		pnSpace.history.SkippedPacket(skippedPN)
+		if h.logger.Debug() {
+			h.logger.Debugf("Skipping packet number %d on path %d", skippedPN, id)
+		}
+	}
+	return pn
+}
+
 func (h *sentPacketHandler) SendMode(now monotime.Time) SendMode {
 	numTrackedPackets := h.appDataPackets.history.Len()
 	if h.initialPackets != nil {

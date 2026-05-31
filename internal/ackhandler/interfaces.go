@@ -32,6 +32,14 @@ type SentPacketHandler interface {
 	PeekPacketNumber(protocol.EncryptionLevel) (protocol.PacketNumber, protocol.PacketNumberLen)
 	PopPacketNumber(protocol.EncryptionLevel) protocol.PacketNumber
 
+	// PeekPacketNumberForPath and PopPacketNumberForPath operate on a specific
+	// path's application-data (1-RTT) packet number space, for multipath QUIC.
+	// PathID InitialPathID is the default path; for it these are equivalent to
+	// PeekPacketNumber/PopPacketNumber at the 1-RTT encryption level.
+	// An unknown path ID falls back to the initial path.
+	PeekPacketNumberForPath(PathID) (protocol.PacketNumber, protocol.PacketNumberLen)
+	PopPacketNumberForPath(PathID) protocol.PacketNumber
+
 	GetLossDetectionTimeout() monotime.Time
 	OnLossDetectionTimeout(now monotime.Time) error
 
