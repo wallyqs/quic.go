@@ -355,18 +355,24 @@ var newConnection = func(
 	if s.qlogger != nil {
 		s.qlogTransportParameters(params, protocol.PerspectiveServer, false)
 	}
-	cs := handshake.NewCryptoSetupServer(
-		clientDestConnID,
-		conn.LocalAddr(),
-		conn.RemoteAddr(),
-		params,
-		tlsConf,
-		conf.Allow0RTT,
-		s.rttStats,
-		s.qlogger,
-		logger,
-		s.version,
-	)
+	var cs handshake.CryptoSetup
+	if handshake.IsNQUIC(tlsConf) {
+		// NQUIC: TLS-free profile (see internal/handshake/nquic_crypto_setup.go).
+		cs = handshake.NewNQUICCryptoSetupServer(clientDestConnID, params, s.version)
+	} else {
+		cs = handshake.NewCryptoSetupServer(
+			clientDestConnID,
+			conn.LocalAddr(),
+			conn.RemoteAddr(),
+			params,
+			tlsConf,
+			conf.Allow0RTT,
+			s.rttStats,
+			s.qlogger,
+			logger,
+			s.version,
+		)
+	}
 	s.cryptoStreamHandler = cs
 	s.packer = newPacketPacker(srcConnID, s.connIDManager.Get, s.initialStream, s.handshakeStream, s.sentPacketHandler, s.retransmissionQueue, cs, s.framer, &s.receivedPacketHandler, s.datagramQueue, s.perspective)
 	s.unpacker = newPacketUnpacker(cs, s.srcConnIDLen)
@@ -481,16 +487,22 @@ var newClientConnection = func(
 	if s.qlogger != nil {
 		s.qlogTransportParameters(params, protocol.PerspectiveClient, false)
 	}
-	cs := handshake.NewCryptoSetupClient(
-		destConnID,
-		params,
-		tlsConf,
-		enable0RTT,
-		s.rttStats,
-		s.qlogger,
-		logger,
-		s.version,
-	)
+	var cs handshake.CryptoSetup
+	if handshake.IsNQUIC(tlsConf) {
+		// NQUIC: TLS-free profile (see internal/handshake/nquic_crypto_setup.go).
+		cs = handshake.NewNQUICCryptoSetupClient(destConnID, params, s.version)
+	} else {
+		cs = handshake.NewCryptoSetupClient(
+			destConnID,
+			params,
+			tlsConf,
+			enable0RTT,
+			s.rttStats,
+			s.qlogger,
+			logger,
+			s.version,
+		)
+	}
 	s.cryptoStreamHandler = cs
 	s.cryptoStreamManager = newCryptoStreamManager(s.initialStream, s.handshakeStream, oneRTTStream)
 	s.unpacker = newPacketUnpacker(cs, s.srcConnIDLen)
