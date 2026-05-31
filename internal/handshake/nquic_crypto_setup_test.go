@@ -73,7 +73,9 @@ func TestNQUICHandshake(t *testing.T) {
 	require.NoError(t, server.StartHandshake(context.Background()))
 	require.Empty(t, drain(server))
 
-	// 2. Server handles the client hello.
+	// 2. Server handles the client hello. It replies with its own transport
+	// parameters but does NOT complete yet: it waits for the client's
+	// Handshake "finished".
 	require.NoError(t, server.HandleMessage(clientHello.Data, protocol.EncryptionInitial))
 	serverEvents := drain(server)
 
@@ -86,9 +88,9 @@ func TestNQUICHandshake(t *testing.T) {
 	require.NotEmpty(t, serverHello.Data)
 
 	_, ok = findEvent(serverEvents, EventReceivedReadKeys)
-	require.True(t, ok, "server should install 1-RTT read keys")
+	require.True(t, ok, "server should install read keys")
 	_, ok = findEvent(serverEvents, EventHandshakeComplete)
-	require.True(t, ok, "server handshake should complete")
+	require.False(t, ok, "server must NOT complete before the client's finished")
 
 	// Server now has 1-RTT keys available.
 	serverSealer, err := server.Get1RTTSealer()
@@ -96,13 +98,18 @@ func TestNQUICHandshake(t *testing.T) {
 	serverOpener, err := server.Get1RTTOpener()
 	require.NoError(t, err)
 
-	// 3. Client handles the server hello.
+	// 3. Client handles the server hello: it installs keys, sends its Handshake
+	// "finished", and completes.
 	require.NoError(t, client.HandleMessage(serverHello.Data, protocol.EncryptionInitial))
 	clientEvents = drain(client)
 
 	tpEvent, ok = findEvent(clientEvents, EventReceivedTransportParameters)
 	require.True(t, ok, "client should receive transport parameters")
 	require.Equal(t, serverTP.InitialMaxData, tpEvent.TransportParameters.InitialMaxData)
+
+	clientFin, ok := findEvent(clientEvents, EventWriteHandshakeData)
+	require.True(t, ok, "client should write a Handshake finished")
+	require.NotEmpty(t, clientFin.Data)
 	_, ok = findEvent(clientEvents, EventHandshakeComplete)
 	require.True(t, ok, "client handshake should complete")
 
@@ -111,7 +118,13 @@ func TestNQUICHandshake(t *testing.T) {
 	clientOpener, err := client.Get1RTTOpener()
 	require.NoError(t, err)
 
-	// 4. Null AEAD: application data travels in cleartext with zero overhead.
+	// 4. Server handles the client's Handshake finished and now completes.
+	require.NoError(t, server.HandleMessage(clientFin.Data, protocol.EncryptionHandshake))
+	serverEvents = drain(server)
+	_, ok = findEvent(serverEvents, EventHandshakeComplete)
+	require.True(t, ok, "server handshake should complete after the client's finished")
+
+	// 5. Null AEAD: application data travels in cleartext with zero overhead.
 	require.Equal(t, 0, clientSealer.Overhead())
 	require.Equal(t, 0, serverSealer.Overhead())
 
@@ -146,11 +159,10 @@ func TestNQUICInitialKeysAreStandard(t *testing.T) {
 	// The standard Initial AEAD (AES-128-GCM) adds a 16-byte auth tag.
 	require.Equal(t, 16, sealer.Overhead())
 
-	// Handshake level is never available in NQUIC.
+	// Handshake and 1-RTT keys are not available until the parameter exchange
+	// has happened.
 	_, err = cs.GetHandshakeSealer()
 	require.ErrorIs(t, err, ErrKeysNotYetAvailable)
-
-	// 1-RTT keys are not available until the handshake exchange completes.
 	_, err = cs.Get1RTTSealer()
 	require.ErrorIs(t, err, ErrKeysNotYetAvailable)
 }

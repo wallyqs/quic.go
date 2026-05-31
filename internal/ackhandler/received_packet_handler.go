@@ -35,6 +35,14 @@ func (h *ReceivedPacketHandler) ReceivedPacket(
 ) error {
 	switch encLevel {
 	case protocol.EncryptionInitial:
+		// The Initial packet number space might already have been dropped as a result
+		// of processing the CRYPTO frame that was contained in this packet.
+		// In standard QUIC this can't happen for the Initial space, but the NQUIC
+		// profile completes and confirms the handshake while processing the peer's
+		// first Initial packet, which drops the Initial keys before we get here.
+		if h.initialPackets == nil {
+			return nil
+		}
 		return h.initialPackets.ReceivedPacket(pn, ecn, ackEliciting)
 	case protocol.EncryptionHandshake:
 		// The Handshake packet number space might already have been dropped as a result

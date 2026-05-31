@@ -19,32 +19,46 @@ import (
 // keys. The tls.Config is otherwise ignored.
 const NQUICNextProto = "nquic-null/v1"
 
+// nquicFinished is the (fixed) payload of the NQUIC "finished" message, sent at
+// the Handshake encryption level. Its only job is to occupy the Handshake
+// packet-number space so the standard key-drop machinery fires at the right
+// time (see the flow description on nquicSetup).
+var nquicFinished = []byte("NQUIC-FIN/1")
+
 // IsNQUIC reports whether the given tls.Config selects the NQUIC profile.
 func IsNQUIC(tlsConf *tls.Config) bool {
 	return tlsConf != nil && slices.Contains(tlsConf.NextProtos, NQUICNextProto)
 }
 
-// nquicCryptoSetup is a TLS-free CryptoSetup implementation for the NQUIC
-// variant. It satisfies the same handshake.CryptoSetup interface that the
-// connection drives, but instead of running a TLS 1.3 handshake it performs a
-// minimal exchange whose only job is to carry QUIC transport parameters.
+// nquicSetup is a TLS-free CryptoSetup implementation for the NQUIC variant. It
+// satisfies the same handshake.CryptoSetup interface the connection drives, but
+// instead of running a TLS 1.3 handshake it performs a minimal exchange whose
+// only job is to carry QUIC transport parameters and to drive the connection's
+// key-drop / handshake-confirmation machinery in the same order TLS would.
 //
-// Handshake message flow (null security model):
+// Message flow (null security model):
 //
-//	client                                  server
-//	------ Initial[CRYPTO: client TPs] ---->
-//	<----- Initial[CRYPTO: server TPs] ------
-//	<----- 1-RTT[HANDSHAKE_DONE, ...] -------   (queued by the connection)
+//	client                                       server
+//	------ Initial   [CRYPTO: client TPs] ------>
+//	<----- Initial   [CRYPTO: server TPs] -------
+//	------ Handshake [CRYPTO: "finished"] ------>
+//	<----- 1-RTT     [HANDSHAKE_DONE, ...] ------   (queued by the connection)
 //
-// The Initial encryption level keeps using the standard connection-ID-derived
-// AEAD (NewInitialAEAD) — it requires no TLS and protects the parameter
-// exchange exactly like vanilla QUIC. The 1-RTT (application) level uses the
-// null AEAD, i.e. application data travels in cleartext.
+// Why the Handshake round trip matters: the connection confirms the handshake
+// (and drops Initial keys) the moment EventHandshakeComplete fires. If the
+// server completed while processing the client's *Initial*, it would drop its
+// Initial keys before its Initial reply (server TPs) was ever transmitted, and
+// the client would hang. By deferring the server's completion until it receives
+// the client's Handshake "finished", the server's Initial flight is guaranteed
+// to have been sent first — exactly mirroring TLS, where the server completes
+// only after the client's Finished.
 //
-// The Handshake encryption level is never used: NQUIC transitions straight
-// from Initial to 1-RTT. The connection / packet packer tolerate the
-// Handshake keys never becoming available (GetHandshakeSealer simply keeps
-// returning ErrKeysNotYetAvailable / ErrKeysDropped).
+// Key schedule:
+//   - Initial:   standard connection-ID-derived AES-GCM (NewInitialAEAD); no
+//     TLS required, protects the transport-parameter exchange as in vanilla QUIC.
+//   - Handshake: null long-header AEAD (cleartext); carries only the "finished"
+//     marker and the ACKs for it.
+//   - 1-RTT:     null short-header AEAD (cleartext); application data.
 type nquicSetup struct {
 	perspective protocol.Perspective
 	version     protocol.Version
@@ -56,6 +70,9 @@ type nquicSetup struct {
 
 	initialSealer LongHeaderSealer
 	initialOpener LongHeaderOpener
+
+	handshakeSealer LongHeaderSealer
+	handshakeOpener LongHeaderOpener
 
 	has1RTTSealer bool
 	has1RTTOpener bool
@@ -103,16 +120,24 @@ func (h *nquicSetup) StartHandshake(context.Context) error {
 }
 
 func (h *nquicSetup) HandleMessage(data []byte, encLevel protocol.EncryptionLevel) error {
-	// All NQUIC handshake data is exchanged at the Initial level.
-	if encLevel != protocol.EncryptionInitial {
+	switch encLevel {
+	case protocol.EncryptionInitial:
+		return h.handleInitial(data)
+	case protocol.EncryptionHandshake:
+		return h.handleHandshake(data)
+	default:
 		return nil
 	}
+}
 
-	peerParams := &wire.TransportParameters{}
+// handleInitial processes the peer's transport parameters carried in the
+// Initial CRYPTO stream.
+func (h *nquicSetup) handleInitial(data []byte) error {
 	sentBy := protocol.PerspectiveServer
 	if h.perspective == protocol.PerspectiveServer {
 		sentBy = protocol.PerspectiveClient
 	}
+	peerParams := &wire.TransportParameters{}
 	if err := peerParams.Unmarshal(data, sentBy); err != nil {
 		return err
 	}
@@ -122,26 +147,50 @@ func (h *nquicSetup) HandleMessage(data []byte, encLevel protocol.EncryptionLeve
 		TransportParameters: peerParams,
 	})
 
+	// Both Handshake and 1-RTT keys can be installed now: there is no key
+	// exchange to perform.
+	h.installKeys()
+
 	if h.perspective == protocol.PerspectiveServer {
-		// Reply with the server "hello": our transport parameters.
+		// Reply with the server "hello" (our transport parameters). The server
+		// does NOT complete yet: it waits for the client's Handshake "finished"
+		// so that this Initial reply is sent before Initial keys are dropped.
 		h.events = append(h.events, Event{
 			Kind: EventWriteInitialData,
 			Data: h.ourParams.Marshal(protocol.PerspectiveServer),
 		})
+		return nil
 	}
 
-	// Both sides now have everything they need: install 1-RTT keys and
-	// declare the handshake complete. There is no key exchange to perform.
-	h.install1RTTKeys()
-	h.events = append(h.events, Event{Kind: EventHandshakeComplete})
+	// Client: send the Handshake "finished" and declare completion. Sending a
+	// Handshake packet causes the connection to drop Initial keys (RFC 9001
+	// §4.9.1), after the client's Initial has already been sent.
+	h.events = append(h.events,
+		Event{Kind: EventWriteHandshakeData, Data: nquicFinished},
+		Event{Kind: EventHandshakeComplete},
+	)
 	return nil
 }
 
-func (h *nquicSetup) install1RTTKeys() {
+// handleHandshake processes the peer's Handshake CRYPTO data. Only the server
+// acts on it: the client's "finished" completes the server's handshake.
+func (h *nquicSetup) handleHandshake([]byte) error {
+	if h.perspective == protocol.PerspectiveServer {
+		h.events = append(h.events, Event{Kind: EventHandshakeComplete})
+	}
+	return nil
+}
+
+// installKeys installs the null Handshake and 1-RTT keys and signals the
+// connection that new read keys are available (so it can reprocess any packets
+// that arrived before the keys were ready).
+func (h *nquicSetup) installKeys() {
+	if h.handshakeSealer == nil {
+		h.handshakeSealer = &nullSealer{}
+		h.handshakeOpener = &nullLongHeaderOpener{}
+	}
 	h.has1RTTSealer = true
 	h.has1RTTOpener = true
-	// Signal that new read keys are available so the connection reprocesses
-	// any packets that arrived before the keys were ready.
 	h.events = append(h.events, Event{Kind: EventReceivedReadKeys})
 }
 
@@ -169,7 +218,9 @@ func (h *nquicSetup) DiscardInitialKeys() {
 
 func (h *nquicSetup) SetHandshakeConfirmed() {
 	h.handshakeConfirmed = true
-	// NQUIC never installs Handshake keys, so there is nothing to drop here.
+	// Drop Handshake keys, mirroring the TLS crypto setup.
+	h.handshakeSealer = nil
+	h.handshakeOpener = nil
 }
 
 func (h *nquicSetup) ConnectionState() ConnectionState {
@@ -184,11 +235,13 @@ func (h *nquicSetup) GetInitialSealer() (LongHeaderSealer, error) {
 }
 
 func (h *nquicSetup) GetHandshakeSealer() (LongHeaderSealer, error) {
-	// NQUIC skips the Handshake encryption level entirely.
-	if h.initialSealer == nil {
-		return nil, ErrKeysDropped
+	if h.handshakeSealer == nil {
+		if h.initialSealer == nil {
+			return nil, ErrKeysDropped
+		}
+		return nil, ErrKeysNotYetAvailable
 	}
-	return nil, ErrKeysNotYetAvailable
+	return h.handshakeSealer, nil
 }
 
 func (h *nquicSetup) Get0RTTSealer() (LongHeaderSealer, error) {
@@ -210,10 +263,13 @@ func (h *nquicSetup) GetInitialOpener() (LongHeaderOpener, error) {
 }
 
 func (h *nquicSetup) GetHandshakeOpener() (LongHeaderOpener, error) {
-	if h.initialOpener == nil {
-		return nil, ErrKeysDropped
+	if h.handshakeOpener == nil {
+		if h.initialOpener == nil {
+			return nil, ErrKeysDropped
+		}
+		return nil, ErrKeysNotYetAvailable
 	}
-	return nil, ErrKeysNotYetAvailable
+	return h.handshakeOpener, nil
 }
 
 func (h *nquicSetup) Get0RTTOpener() (LongHeaderOpener, error) {
