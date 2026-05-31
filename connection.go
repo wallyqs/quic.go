@@ -143,6 +143,9 @@ type Conn struct {
 	pathManager         *pathManager
 	largestRcvdAppData  protocol.PacketNumber
 	pathManagerOutgoing atomic.Pointer[pathManagerOutgoing]
+	// multipath tracks additional simultaneously-active paths. It is only
+	// non-nil once the multipath extension has been negotiated.
+	multipath *multipathManager
 
 	streamsMap      *streamsMap
 	connIDManager   *connIDManager
@@ -2359,6 +2362,12 @@ func (c *Conn) restoreTransportParameters(params *wire.TransportParameters) {
 	c.connIDGenerator.SetMaxActiveConnIDs(params.ActiveConnectionIDLimit)
 	c.connFlowController.UpdateSendWindow(params.InitialMaxData)
 	c.streamsMap.HandleTransportParameters(params)
+	// If both endpoints advertised multipath support, initialize the multipath
+	// manager. The maximum path ID is the smaller of the two advertised values.
+	if c.config.EnableMultipath && params.InitialMaxPathID != nil {
+		maxPathID := min(*params.InitialMaxPathID, uint64(protocol.MultipathMaxPathID))
+		c.multipath = newMultipathManager(maxPathID)
+	}
 }
 
 func (c *Conn) handleTransportParameters(params *wire.TransportParameters) error {
@@ -2461,7 +2470,11 @@ func (c *Conn) triggerSending(now monotime.Time) error {
 	sendMode := c.sentPacketHandler.SendMode(now)
 	switch sendMode {
 	case ackhandler.SendAny:
-		return c.sendPackets(now)
+		if err := c.sendPackets(now); err != nil {
+			return err
+		}
+		// Fan out to additional multipath paths (no-op unless multipath is active).
+		return c.sendMultipathPackets(now)
 	case ackhandler.SendNone:
 		c.blocked = blockModeHardBlocked
 		return nil
@@ -2791,6 +2804,48 @@ func (c *Conn) registerPackedShortHeaderPacket(p shortHeaderPacket, ecn protocol
 		false,
 	)
 	c.connIDManager.SentPacket()
+}
+
+// sendMultipathPackets fans out 1-RTT packets across every additional path the
+// scheduler selects. It is a no-op unless multipath has been negotiated and at
+// least one additional path is active; the initial path is handled by the
+// normal send loop. Each path uses its own connection ID, packet number space
+// and congestion controller (in the SentPacketHandler).
+//
+// NOTE: this is the experimental multipath data path. It has not been validated
+// against a real multi-path network; see MULTIPATH.md.
+func (c *Conn) sendMultipathPackets(now monotime.Time) error {
+	mp := c.multipath
+	if mp == nil || mp.len() == 0 {
+		return nil
+	}
+	canSend := func(id ackhandler.PathID) bool {
+		return c.sentPacketHandler.SendModeForPath(id, now) == ackhandler.SendAny
+	}
+	for _, id := range selectSendablePaths(mp.schedulablePaths(canSend)) {
+		p, ok := mp.path(id)
+		if !ok {
+			continue
+		}
+		sp, buf, err := c.packer.PackPacketForPath(id, p.connID, c.maxPacketSize(), now, c.version)
+		if err == errNothingToPack {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		ecn := c.sentPacketHandler.ECNMode(true)
+		c.logShortHeaderPacket(sp, ecn, buf.Len())
+		largestAcked := protocol.InvalidPacketNumber
+		if sp.Ack != nil {
+			largestAcked = sp.Ack.LargestAcked()
+		}
+		c.sentPacketHandler.SentPacketForPath(id, now, sp.PacketNumber, largestAcked, sp.StreamFrames, sp.Frames, ecn, sp.Length, sp.IsPathMTUProbePacket)
+		if _, err := p.transport.WriteTo(buf.Data, c.conn.RemoteAddr()); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *Conn) sendPackedCoalescedPacket(packet *coalescedPacket, ecn protocol.ECN, now monotime.Time) error {

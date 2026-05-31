@@ -176,7 +176,7 @@ func NewSentPacketHandler(
 // controller and RTT estimator) for a new path. The initial path (InitialPathID)
 // is created automatically; this is used for additional paths once the multipath
 // extension has been negotiated. It is a no-op if the path already exists.
-func (h *sentPacketHandler) addPath(id PathID) {
+func (h *sentPacketHandler) AddPath(id PathID) {
 	if _, ok := h.appDataPaths[id]; ok {
 		return
 	}
@@ -191,7 +191,7 @@ func (h *sentPacketHandler) appDataPath(id PathID) *pathState {
 
 // removePath drops the state for an abandoned path.
 // The initial path cannot be removed.
-func (h *sentPacketHandler) removePath(id PathID) {
+func (h *sentPacketHandler) RemovePath(id PathID) {
 	if id == InitialPathID {
 		return
 	}

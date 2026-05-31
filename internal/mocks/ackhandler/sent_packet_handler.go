@@ -43,6 +43,42 @@ func (m *MockSentPacketHandler) EXPECT() *MockSentPacketHandlerMockRecorder {
 	return m.recorder
 }
 
+// AddPath mocks base method.
+func (m *MockSentPacketHandler) AddPath(id ackhandler.PathID) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "AddPath", id)
+}
+
+// AddPath indicates an expected call of AddPath.
+func (mr *MockSentPacketHandlerMockRecorder) AddPath(id any) *MockSentPacketHandlerAddPathCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddPath", reflect.TypeOf((*MockSentPacketHandler)(nil).AddPath), id)
+	return &MockSentPacketHandlerAddPathCall{Call: call}
+}
+
+// MockSentPacketHandlerAddPathCall wrap *gomock.Call
+type MockSentPacketHandlerAddPathCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSentPacketHandlerAddPathCall) Return() *MockSentPacketHandlerAddPathCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSentPacketHandlerAddPathCall) Do(f func(ackhandler.PathID)) *MockSentPacketHandlerAddPathCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSentPacketHandlerAddPathCall) DoAndReturn(f func(ackhandler.PathID)) *MockSentPacketHandlerAddPathCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // DropPackets mocks base method.
 func (m *MockSentPacketHandler) DropPackets(arg0 protocol.EncryptionLevel, rcvTime monotime.Time) {
 	m.ctrl.T.Helper()
@@ -567,6 +603,42 @@ func (c *MockSentPacketHandlerReceivedPacketCall) Do(f func(protocol.EncryptionL
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockSentPacketHandlerReceivedPacketCall) DoAndReturn(f func(protocol.EncryptionLevel, monotime.Time)) *MockSentPacketHandlerReceivedPacketCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// RemovePath mocks base method.
+func (m *MockSentPacketHandler) RemovePath(id ackhandler.PathID) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "RemovePath", id)
+}
+
+// RemovePath indicates an expected call of RemovePath.
+func (mr *MockSentPacketHandlerMockRecorder) RemovePath(id any) *MockSentPacketHandlerRemovePathCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemovePath", reflect.TypeOf((*MockSentPacketHandler)(nil).RemovePath), id)
+	return &MockSentPacketHandlerRemovePathCall{Call: call}
+}
+
+// MockSentPacketHandlerRemovePathCall wrap *gomock.Call
+type MockSentPacketHandlerRemovePathCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSentPacketHandlerRemovePathCall) Return() *MockSentPacketHandlerRemovePathCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSentPacketHandlerRemovePathCall) Do(f func(ackhandler.PathID)) *MockSentPacketHandlerRemovePathCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSentPacketHandlerRemovePathCall) DoAndReturn(f func(ackhandler.PathID)) *MockSentPacketHandlerRemovePathCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

@@ -1797,7 +1797,7 @@ func TestSentPacketHandlerPerPathPacketNumberSpaces(t *testing.T) {
 
 	// add a second path: it gets its own, independent packet number space,
 	// congestion controller and RTT estimator
-	h.addPath(1)
+	h.AddPath(1)
 	require.NotNil(t, h.appDataPath(1))
 	require.NotSame(t, h.appDataPath(InitialPathID).space, h.appDataPath(1).space)
 	require.NotSame(t, h.congestion, h.appDataPath(1).congestion)
@@ -1819,13 +1819,13 @@ func TestSentPacketHandlerPerPathPacketNumberSpaces(t *testing.T) {
 
 	// adding the same path again is a no-op (keeps the existing space)
 	existing := h.appDataPath(1)
-	h.addPath(1)
+	h.AddPath(1)
 	require.Same(t, existing, h.appDataPath(1))
 
 	// the initial path cannot be removed; other paths can
-	h.removePath(InitialPathID)
+	h.RemovePath(InitialPathID)
 	require.NotNil(t, h.appDataPath(InitialPathID))
-	h.removePath(1)
+	h.RemovePath(1)
 	require.Nil(t, h.appDataPath(1))
 }
 
@@ -1847,7 +1847,7 @@ func TestSentPacketHandlerPerPathPacketNumbers(t *testing.T) {
 	require.Equal(t, peek0, peekUnknown)
 
 	// a second path has its own, independent packet number sequence
-	h.addPath(1)
+	h.AddPath(1)
 	pn := h.PopPacketNumberForPath(1)
 	nextPath1, _ := h.PeekPacketNumberForPath(1)
 	require.Equal(t, pn+1, nextPath1)
@@ -1862,7 +1862,7 @@ func TestSentPacketHandlerSentPacketForPath(t *testing.T) {
 		false, false, nil, protocol.PerspectiveClient, nil, utils.DefaultLogger,
 	)
 	h := sph.(*sentPacketHandler)
-	h.addPath(1)
+	h.AddPath(1)
 
 	var packets packetTracker
 	now := monotime.Now()
@@ -1891,7 +1891,7 @@ func TestSentPacketHandlerReceivedAckForPath(t *testing.T) {
 		false, false, nil, protocol.PerspectiveClient, nil, utils.DefaultLogger,
 	)
 	h := sph.(*sentPacketHandler)
-	h.addPath(1)
+	h.AddPath(1)
 
 	var packets packetTracker
 	now := monotime.Now()

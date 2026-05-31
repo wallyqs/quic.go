@@ -53,4 +53,10 @@ type SentPacketHandler interface {
 	OnLossDetectionTimeout(now monotime.Time) error
 
 	MigratedPath(now monotime.Time, initialMaxPacketSize protocol.ByteCount)
+
+	// AddPath creates independent per-path state (packet number space, congestion
+	// controller and RTT estimator) for an additional multipath path.
+	// RemovePath drops it; the initial path cannot be removed.
+	AddPath(id PathID)
+	RemovePath(id PathID)
 }
