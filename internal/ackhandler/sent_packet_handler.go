@@ -68,7 +68,12 @@ type sentPacketHandler struct {
 	initialPackets   *packetNumberSpace
 	handshakePackets *packetNumberSpace
 	appDataPackets   *packetNumberSpace
-	lostPackets      lostPacketTracker // only for application-data packet number space
+	// appDataPaths holds the application-data packet number space for each path.
+	// The initial path (InitialPathID) is always present and aliases appDataPackets.
+	// Additional entries are created when the multipath extension is in use; each
+	// path has its own packet number space (RFC draft-ietf-quic-multipath).
+	appDataPaths map[PathID]*packetNumberSpace
+	lostPackets  lostPacketTracker // only for application-data packet number space
 	// send time of the largest acknowledged packet, across all packet number spaces
 	largestAckedTime monotime.Time
 
@@ -153,11 +158,38 @@ func NewSentPacketHandler(
 		qlogger:                        qlogger,
 		logger:                         logger,
 	}
+	h.appDataPaths = map[PathID]*packetNumberSpace{InitialPathID: h.appDataPackets}
 	if enableECN {
 		h.enableECN = true
 		h.ecnTracker = newECNTracker(logger, qlogger)
 	}
 	return h
+}
+
+// addPath creates the application-data packet number space for a new path.
+// The initial path (InitialPathID) is created automatically; this is used for
+// additional paths once the multipath extension has been negotiated.
+// It is a no-op if the path already exists.
+func (h *sentPacketHandler) addPath(id PathID) {
+	if _, ok := h.appDataPaths[id]; ok {
+		return
+	}
+	h.appDataPaths[id] = newPacketNumberSpace(0, true)
+}
+
+// appDataPath returns the application-data packet number space for the given path,
+// or nil if the path does not exist.
+func (h *sentPacketHandler) appDataPath(id PathID) *packetNumberSpace {
+	return h.appDataPaths[id]
+}
+
+// removePath drops the packet number space for an abandoned path.
+// The initial path cannot be removed.
+func (h *sentPacketHandler) removePath(id PathID) {
+	if id == InitialPathID {
+		return
+	}
+	delete(h.appDataPaths, id)
 }
 
 func (h *sentPacketHandler) removeFromBytesInFlight(p *packet) {
@@ -1104,6 +1136,7 @@ func (h *sentPacketHandler) ResetForRetry(now monotime.Time) {
 	}
 	h.initialPackets = newPacketNumberSpace(h.initialPackets.pns.Peek(), false)
 	h.appDataPackets = newPacketNumberSpace(h.appDataPackets.pns.Peek(), true)
+	h.appDataPaths[InitialPathID] = h.appDataPackets
 	oldAlarm := h.alarm
 	h.alarm = alarmTimer{}
 	if h.qlogger != nil {

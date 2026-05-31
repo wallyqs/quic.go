@@ -1770,3 +1770,48 @@ func benchmarkSendAndAcknowledge(b *testing.B, ackEvery, inFlight int) {
 		}
 	}
 }
+
+func TestSentPacketHandlerPerPathPacketNumberSpaces(t *testing.T) {
+	sph := NewSentPacketHandler(
+		0,
+		1200,
+		utils.NewRTTStats(),
+		&utils.ConnectionStats{},
+		false,
+		false,
+		nil,
+		protocol.PerspectiveClient,
+		nil,
+		utils.DefaultLogger,
+	)
+	h := sph.(*sentPacketHandler)
+
+	// the initial path always exists and aliases the AppData packet number space
+	require.NotNil(t, h.appDataPath(InitialPathID))
+	require.Same(t, h.appDataPackets, h.appDataPath(InitialPathID))
+	// other paths don't exist yet
+	require.Nil(t, h.appDataPath(1))
+
+	// add a second path: it gets its own, independent packet number space
+	h.addPath(1)
+	require.NotNil(t, h.appDataPath(1))
+	require.NotSame(t, h.appDataPath(InitialPathID), h.appDataPath(1))
+
+	// advancing one path's packet numbers doesn't affect the other
+	before := h.appDataPath(InitialPathID).pns.Peek()
+	for range 5 {
+		h.appDataPath(1).pns.Pop()
+	}
+	require.Equal(t, before, h.appDataPath(InitialPathID).pns.Peek())
+
+	// adding the same path again is a no-op (keeps the existing space)
+	existing := h.appDataPath(1)
+	h.addPath(1)
+	require.Same(t, existing, h.appDataPath(1))
+
+	// the initial path cannot be removed; other paths can
+	h.removePath(InitialPathID)
+	require.NotNil(t, h.appDataPath(InitialPathID))
+	h.removePath(1)
+	require.Nil(t, h.appDataPath(1))
+}

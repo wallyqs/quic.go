@@ -49,8 +49,18 @@ packet number spaces all assume a single active path.
   simultaneously, which is exactly what multipath needs. Locked in by
   `TestConnIDManagerMultipathSimultaneousPaths`. No new code required here.
 
-- **Phase 3 — per-path packet number spaces.** Add an AppData PN space per path
-  in `internal/ackhandler`; route ACKs per path.
+- **Phase 3 — per-path packet number spaces (IN PROGRESS).**
+  - Added `ackhandler.PathID` (`internal/ackhandler/path.go`); the initial path is `InitialPathID` (0).
+  - `sentPacketHandler` now holds `appDataPaths map[PathID]*packetNumberSpace`,
+    with path 0 aliasing the existing `appDataPackets`. Added `addPath`,
+    `appDataPath` and `removePath`, and kept the path-0 entry in sync across
+    `ResetForRetry`.
+  - White-box test `TestSentPacketHandlerPerPathPacketNumberSpaces` verifies
+    independent per-path packet numbering. Existing single-path suite still
+    passes (no path-0 regression).
+  - REMAINING: route received ACKs to the right path's space, and per-path
+    loss detection (currently loss/PTO still read path 0). This merges into
+    Phase 4, since `packetNumberSpace` carries `lossTime`/`lastAckElicitingPacketTime`.
 
 - **Phase 4 — per-path congestion control + RTT.** The hard part: one
   `congestion.SendAlgorithm` + `RTTStats` per path in `sent_packet_handler.go`.
