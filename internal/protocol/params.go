@@ -135,6 +135,11 @@ const MaxActiveConnectionIDs = 4
 // MaxIssuedConnectionIDs is the maximum number of connection IDs that we're issuing at the same time.
 const MaxIssuedConnectionIDs = 6
 
+// MultipathMaxPathID is the maximum path ID we advertise in the initial_max_path_id
+// transport parameter when multipath is enabled. Path IDs range from 0 to this value
+// inclusive, so this permits MultipathMaxPathID+1 simultaneous paths.
+const MultipathMaxPathID = 3
+
 // PacketsPerConnectionID is the number of packets we send using one connection ID.
 // If the peer provices us with enough new connection IDs, we switch to a new connection ID.
 const PacketsPerConnectionID = 10000

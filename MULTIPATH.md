@@ -31,8 +31,17 @@ packet number spaces all assume a single active path.
   - Full encode/decode + parser + transport-parameter round-trip tests.
   - NOT yet wired into the connection (`NewFrameParser(..., false)` in `connection.go`).
 
-- **Phase 2 — negotiation + path-scoped connection IDs.** Plumb `EnableMultipath`
-  through `Config`, send/parse `initial_max_path_id`, associate connection IDs
+- **Phase 2a — negotiation (DONE).**
+  - `Config.EnableMultipath` (`interface.go`), propagated in `config.go`.
+  - Both transport-parameter builders in `connection.go` send `initial_max_path_id`
+    (= `protocol.MultipathMaxPathID`) when enabled.
+  - `NewFrameParser` now receives `c.config.EnableMultipath`, so multipath frames
+    are accepted once enabled locally.
+  - `ConnectionState.SupportsMultipath{Local,Remote}` exposes negotiation; multipath
+    is "active" only when both sides advertise it.
+  - Integration test `TestHandshakeMultipathNegotiation` covers all four combinations.
+
+- **Phase 2b — path-scoped connection IDs (TODO).** Associate connection IDs
   with path IDs in `conn_id_manager.go` / `conn_id_generator.go`.
 
 - **Phase 3 — per-path packet number spaces.** Add an AppData PN space per path

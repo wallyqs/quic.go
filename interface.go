@@ -175,6 +175,11 @@ type Config struct {
 	// Enable QUIC Stream Resets with Partial Delivery.
 	// See https://datatracker.ietf.org/doc/html/draft-ietf-quic-reliable-stream-reset-07.
 	EnableStreamResetPartialDelivery bool
+	// EnableMultipath enables the (experimental, non-interoperable) multipath
+	// extension, allowing a single connection to send over multiple paths
+	// simultaneously. Both endpoints must run quic-go and set this to true.
+	// Multipath is only used if the peer also advertises support.
+	EnableMultipath bool
 
 	Tracer func(ctx context.Context, isClient bool, connID ConnectionID) qlogwriter.Trace
 }
@@ -204,6 +209,12 @@ type ConnectionState struct {
 	SupportsStreamResetPartialDelivery struct {
 		// Remote is true if the peer advertised support.
 		// Local is true if support was enabled via Config.EnableStreamResetPartialDelivery.
+		Remote, Local bool
+	}
+	// SupportsMultipath indicates support for the (experimental) multipath extension.
+	SupportsMultipath struct {
+		// Remote is true if the peer advertised multipath support.
+		// Local is true if support was enabled via Config.EnableMultipath.
 		Remote, Local bool
 	}
 	// Used0RTT says if 0-RTT resumption was used.

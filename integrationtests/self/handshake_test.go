@@ -96,6 +96,43 @@ func TestHandshake(t *testing.T) {
 	}
 }
 
+func TestHandshakeMultipathNegotiation(t *testing.T) {
+	for _, tt := range []struct {
+		name               string
+		serverMP, clientMP bool
+	}{
+		{name: "both enabled", serverMP: true, clientMP: true},
+		{name: "only client", serverMP: false, clientMP: true},
+		{name: "only server", serverMP: true, clientMP: false},
+		{name: "neither", serverMP: false, clientMP: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			server, err := quic.Listen(newUDPConnLocalhost(t), getTLSConfig(), getQuicConfig(&quic.Config{EnableMultipath: tt.serverMP}))
+			require.NoError(t, err)
+			defer server.Close()
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			conn, err := quic.Dial(ctx, newUDPConnLocalhost(t), server.Addr(), getTLSClientConfig(), getQuicConfig(&quic.Config{EnableMultipath: tt.clientMP}))
+			require.NoError(t, err)
+			defer conn.CloseWithError(0, "")
+
+			serverConn, err := server.Accept(ctx)
+			require.NoError(t, err)
+			defer serverConn.CloseWithError(0, "")
+
+			clientState := conn.ConnectionState()
+			require.Equal(t, tt.clientMP, clientState.SupportsMultipath.Local)
+			// the client learns the server advertised multipath
+			require.Equal(t, tt.serverMP, clientState.SupportsMultipath.Remote)
+
+			serverState := serverConn.ConnectionState()
+			require.Equal(t, tt.serverMP, serverState.SupportsMultipath.Local)
+			require.Equal(t, tt.clientMP, serverState.SupportsMultipath.Remote)
+		})
+	}
+}
+
 func TestHandshakeServerMismatch(t *testing.T) {
 	server, err := quic.Listen(newUDPConnLocalhost(t), getTLSConfig(), getQuicConfig(nil))
 	require.NoError(t, err)

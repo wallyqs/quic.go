@@ -352,6 +352,10 @@ var newConnection = func(
 	} else {
 		params.MaxDatagramFrameSize = protocol.InvalidByteCount
 	}
+	if conf.EnableMultipath {
+		maxPathID := uint64(protocol.MultipathMaxPathID)
+		params.InitialMaxPathID = &maxPathID
+	}
 	if s.qlogger != nil {
 		s.qlogTransportParameters(params, protocol.PerspectiveServer, false)
 	}
@@ -478,6 +482,10 @@ var newClientConnection = func(
 	} else {
 		params.MaxDatagramFrameSize = protocol.InvalidByteCount
 	}
+	if conf.EnableMultipath {
+		maxPathID := uint64(protocol.MultipathMaxPathID)
+		params.InitialMaxPathID = &maxPathID
+	}
 	if s.qlogger != nil {
 		s.qlogTransportParameters(params, protocol.PerspectiveClient, false)
 	}
@@ -519,7 +527,7 @@ func (c *Conn) preSetup() {
 		c.config.EnableDatagrams,
 		c.config.EnableStreamResetPartialDelivery,
 		false, // ACK_FREQUENCY is not supported yet
-		false, // multipath is not yet wired up at the connection level
+		c.config.EnableMultipath,
 	)
 	c.rttStats = utils.NewRTTStats()
 	c.connFlowController = flowcontrol.NewConnectionFlowController(
@@ -782,9 +790,11 @@ func (c *Conn) ConnectionState() ConnectionState {
 	if c.peerParams != nil {
 		c.connState.SupportsDatagrams.Remote = c.supportsDatagrams()
 		c.connState.SupportsStreamResetPartialDelivery.Remote = c.peerParams.EnableResetStreamAt
+		c.connState.SupportsMultipath.Remote = c.peerParams.InitialMaxPathID != nil
 	}
 	c.connState.SupportsDatagrams.Local = c.config.EnableDatagrams
 	c.connState.SupportsStreamResetPartialDelivery.Local = c.config.EnableStreamResetPartialDelivery
+	c.connState.SupportsMultipath.Local = c.config.EnableMultipath
 	c.connState.GSO = c.conn.capabilities().GSO
 	return c.connState
 }
