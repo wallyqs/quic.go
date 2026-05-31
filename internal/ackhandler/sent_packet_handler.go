@@ -1045,14 +1045,107 @@ func (h *sentPacketHandler) PopPacketNumberForPath(id PathID) protocol.PacketNum
 	return pn
 }
 
-func (h *sentPacketHandler) SendMode(now monotime.Time) SendMode {
-	numTrackedPackets := h.appDataPackets.history.Len()
+// SentPacketForPath records a 1-RTT packet sent on a specific path. For the
+// initial path it is equivalent to SentPacket at the 1-RTT encryption level.
+// For additional paths it records the packet against that path's packet number
+// space, congestion controller and bytes-in-flight.
+//
+// NOTE: per-path loss detection (the loss-detection timer for additional paths)
+// and per-path ACK accounting are handled by setLossDetectionTimer / ReceivedAck;
+// see the multipath integration notes in MULTIPATH.md.
+func (h *sentPacketHandler) SentPacketForPath(
+	id PathID,
+	t monotime.Time,
+	pn, largestAcked protocol.PacketNumber,
+	streamFrames []StreamFrame,
+	frames []Frame,
+	ecn protocol.ECN,
+	size protocol.ByteCount,
+	isPathMTUProbePacket bool,
+) {
+	if id == InitialPathID {
+		h.SentPacket(t, pn, largestAcked, streamFrames, frames, protocol.Encryption1RTT, ecn, size, isPathMTUProbePacket, false)
+		return
+	}
+	ps := h.appDataPaths[id]
+	if ps == nil {
+		return
+	}
+	h.bytesSent += size
+	h.connStats.BytesSent.Add(uint64(size))
+	h.connStats.PacketsSent.Add(1)
+
+	pnSpace := ps.space
+	pnSpace.largestSent = pn
+
+	p := getPacket()
+	p.SendTime = t
+	p.EncryptionLevel = protocol.Encryption1RTT
+	p.Length = size
+	p.Frames = frames
+	p.LargestAcked = largestAcked
+	p.StreamFrames = streamFrames
+	p.IsPathMTUProbePacket = isPathMTUProbePacket
+	isAckEliciting := p.IsAckEliciting()
+
+	if isAckEliciting {
+		pnSpace.lastAckElicitingPacketTime = t
+		ps.bytesInFlight += size
+		p.includedInBytesInFlight = true
+	}
+	ps.congestion.OnPacketSent(t, ps.bytesInFlight, pn, size, isAckEliciting)
+	pnSpace.history.SentPacket(pn, p)
+	h.setLossDetectionTimer(t)
+}
+
+// SendModeForPath returns the send mode for a specific path. For the initial
+// path it is equivalent to SendMode. For additional paths, the connection-wide
+// limits (amplification, number of tracked packets) still apply, but the
+// congestion and pacing decisions use that path's own congestion controller.
+func (h *sentPacketHandler) SendModeForPath(id PathID, now monotime.Time) SendMode {
+	if id == InitialPathID {
+		return h.SendMode(now)
+	}
+	ps := h.appDataPaths[id]
+	if ps == nil {
+		return SendNone
+	}
+	if h.isAmplificationLimited() {
+		return SendNone
+	}
+	if h.numTrackedPackets() >= protocol.MaxTrackedSentPackets {
+		return SendNone
+	}
+	if !ps.congestion.CanSend(ps.bytesInFlight) {
+		return SendAck
+	}
+	if h.numTrackedPackets() >= protocol.MaxOutstandingSentPackets {
+		return SendAck
+	}
+	if !ps.congestion.HasPacingBudget(now) {
+		return SendPacingLimited
+	}
+	return SendAny
+}
+
+// numTrackedPackets returns the total number of tracked sent packets across all
+// packet number spaces, including every path's application-data space.
+func (h *sentPacketHandler) numTrackedPackets() int {
+	n := 0
 	if h.initialPackets != nil {
-		numTrackedPackets += h.initialPackets.history.Len()
+		n += h.initialPackets.history.Len()
 	}
 	if h.handshakePackets != nil {
-		numTrackedPackets += h.handshakePackets.history.Len()
+		n += h.handshakePackets.history.Len()
 	}
+	for _, ps := range h.appDataPaths {
+		n += ps.space.history.Len()
+	}
+	return n
+}
+
+func (h *sentPacketHandler) SendMode(now monotime.Time) SendMode {
+	numTrackedPackets := h.numTrackedPackets()
 
 	if h.isAmplificationLimited() {
 		h.logger.Debugf("Amplification window limited. Received %d bytes, already sent out %d bytes", h.bytesReceived, h.bytesSent)

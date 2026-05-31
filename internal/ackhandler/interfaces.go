@@ -10,6 +10,9 @@ import (
 type SentPacketHandler interface {
 	// SentPacket may modify the packet
 	SentPacket(t monotime.Time, pn, largestAcked protocol.PacketNumber, streamFrames []StreamFrame, frames []Frame, encLevel protocol.EncryptionLevel, ecn protocol.ECN, size protocol.ByteCount, isPathMTUProbePacket, isPathProbePacket bool)
+	// SentPacketForPath records a 1-RTT packet sent on a specific path (multipath).
+	// For PathID InitialPathID it is equivalent to SentPacket at the 1-RTT level.
+	SentPacketForPath(id PathID, t monotime.Time, pn, largestAcked protocol.PacketNumber, streamFrames []StreamFrame, frames []Frame, ecn protocol.ECN, size protocol.ByteCount, isPathMTUProbePacket bool)
 	// ReceivedAck processes an ACK frame.
 	// It does not store a copy of the frame.
 	ReceivedAck(f *wire.AckFrame, encLevel protocol.EncryptionLevel, rcvTime monotime.Time) (bool /* 1-RTT packet acked */, error)
@@ -20,6 +23,9 @@ type SentPacketHandler interface {
 
 	// The SendMode determines if and what kind of packets can be sent.
 	SendMode(now monotime.Time) SendMode
+	// SendModeForPath determines the send mode for a specific path (multipath).
+	// For PathID InitialPathID it is equivalent to SendMode.
+	SendModeForPath(id PathID, now monotime.Time) SendMode
 	// TimeUntilSend is the time when the next packet should be sent.
 	// It is used for pacing packets.
 	TimeUntilSend() monotime.Time

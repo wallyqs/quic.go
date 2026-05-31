@@ -1855,3 +1855,32 @@ func TestSentPacketHandlerPerPathPacketNumbers(t *testing.T) {
 	stillPeek0, _ := h.PeekPacketNumberForPath(InitialPathID)
 	require.Equal(t, peek0, stillPeek0)
 }
+
+func TestSentPacketHandlerSentPacketForPath(t *testing.T) {
+	sph := NewSentPacketHandler(
+		0, 1200, utils.NewRTTStats(), &utils.ConnectionStats{},
+		false, false, nil, protocol.PerspectiveClient, nil, utils.DefaultLogger,
+	)
+	h := sph.(*sentPacketHandler)
+	h.addPath(1)
+
+	var packets packetTracker
+	now := monotime.Now()
+
+	// sending an ack-eliciting packet on path 1 counts against path 1's
+	// bytes-in-flight, not the initial path's
+	pn := h.PopPacketNumberForPath(1)
+	h.SentPacketForPath(1, now, pn, protocol.InvalidPacketNumber, nil, []Frame{packets.NewPingFrame(pn)}, protocol.ECNNon, 1000, false)
+	require.Equal(t, protocol.ByteCount(1000), h.appDataPath(1).bytesInFlight)
+	require.Zero(t, h.appDataPath(InitialPathID).bytesInFlight)
+	require.Zero(t, h.bytesInFlight)
+	// the packet is tracked in path 1's history
+	require.Equal(t, 1, h.appDataPath(1).space.history.Len())
+
+	// SendModeForPath for the initial path matches SendMode
+	require.Equal(t, h.SendMode(now), h.SendModeForPath(InitialPathID, now))
+	// path 1 can still send (congestion window not yet full)
+	require.Equal(t, SendAny, h.SendModeForPath(1, now))
+	// an unknown path cannot send
+	require.Equal(t, SendNone, h.SendModeForPath(99, now))
+}
