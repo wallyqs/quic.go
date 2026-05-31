@@ -490,6 +490,9 @@ var newClientConnection = func(
 	var cs handshake.CryptoSetup
 	if handshake.IsNQUIC(tlsConf) {
 		// NQUIC: TLS-free profile (see internal/handshake/nquic_crypto_setup.go).
+		// The Initial CRYPTO data carries transport parameters, not a
+		// ClientHello, so ClientHello scrambling must be disabled.
+		s.initialStream.disableScrambling()
 		cs = handshake.NewNQUICCryptoSetupClient(destConnID, params, s.version)
 	} else {
 		cs = handshake.NewCryptoSetupClient(

@@ -128,6 +128,14 @@ func newInitialCryptoStream(isClient bool) *initialCryptoStream {
 	return s
 }
 
+// disableScrambling turns off ClientHello scrambling. It is used by the NQUIC
+// profile, whose Initial CRYPTO data carries QUIC transport parameters rather
+// than a TLS ClientHello: feeding those bytes to findSNIAndECH would fail with
+// "not a ClientHello".
+func (s *initialCryptoStream) disableScrambling() {
+	s.scramble = false
+}
+
 func (s *initialCryptoStream) HasData() bool {
 	// The ClientHello might be written in multiple parts.
 	// In order to correctly split the ClientHello, we need the entire ClientHello has been queued.
