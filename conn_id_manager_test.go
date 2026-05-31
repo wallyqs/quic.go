@@ -333,6 +333,63 @@ func TestConnIDManagerPathMigration(t *testing.T) {
 	}, removedTokens)
 }
 
+// Multipath relies on multiple paths holding distinct connection IDs at the
+// same time (unlike migration, which ends up using a single active path).
+// This test locks in that the connection ID manager keeps per-path connection
+// IDs simultaneously active.
+func TestConnIDManagerMultipathSimultaneousPaths(t *testing.T) {
+	var frameQueue []wire.Frame
+	var addedTokens, removedTokens []protocol.StatelessResetToken
+	m := newConnIDManager(
+		protocol.ParseConnectionID([]byte{1, 2, 3, 4}),
+		func(token protocol.StatelessResetToken) { addedTokens = append(addedTokens, token) },
+		func(token protocol.StatelessResetToken) { removedTokens = append(removedTokens, token) },
+		func(f wire.Frame) { frameQueue = append(frameQueue, f) },
+	)
+
+	// provide connection IDs for three additional paths
+	for i := uint64(1); i <= 3; i++ {
+		var token protocol.StatelessResetToken
+		token[0] = byte(i)
+		require.NoError(t, m.Add(&wire.NewConnectionIDFrame{
+			SequenceNumber:      i,
+			ConnectionID:        protocol.ParseConnectionID([]byte{byte(i), byte(i), byte(i), byte(i)}),
+			StatelessResetToken: token,
+		}))
+	}
+
+	// each path gets a distinct connection ID, and all remain active at once
+	connIDs := make(map[pathID]protocol.ConnectionID)
+	for id := pathID(1); id <= 3; id++ {
+		connID, ok := m.GetConnIDForPath(id)
+		require.True(t, ok)
+		connIDs[id] = connID
+	}
+	require.Equal(t, protocol.ParseConnectionID([]byte{1, 1, 1, 1}), connIDs[1])
+	require.Equal(t, protocol.ParseConnectionID([]byte{2, 2, 2, 2}), connIDs[2])
+	require.Equal(t, protocol.ParseConnectionID([]byte{3, 3, 3, 3}), connIDs[3])
+	// all three paths' reset tokens are active simultaneously
+	for i := uint64(1); i <= 3; i++ {
+		var token protocol.StatelessResetToken
+		token[0] = byte(i)
+		require.True(t, m.IsActiveStatelessResetToken(token))
+	}
+
+	// retiring one path leaves the others intact
+	m.RetireConnIDForPath(2)
+	var token2 protocol.StatelessResetToken
+	token2[0] = 2
+	require.False(t, m.IsActiveStatelessResetToken(token2))
+	connID1, ok := m.GetConnIDForPath(1)
+	require.True(t, ok)
+	require.Equal(t, protocol.ParseConnectionID([]byte{1, 1, 1, 1}), connID1)
+	connID3, ok := m.GetConnIDForPath(3)
+	require.True(t, ok)
+	require.Equal(t, protocol.ParseConnectionID([]byte{3, 3, 3, 3}), connID3)
+
+	m.Close()
+}
+
 func TestConnIDManagerZeroLengthConnectionID(t *testing.T) {
 	m := newConnIDManager(
 		protocol.ConnectionID{},

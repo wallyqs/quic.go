@@ -41,8 +41,13 @@ packet number spaces all assume a single active path.
     is "active" only when both sides advertise it.
   - Integration test `TestHandshakeMultipathNegotiation` covers all four combinations.
 
-- **Phase 2b — path-scoped connection IDs (TODO).** Associate connection IDs
-  with path IDs in `conn_id_manager.go` / `conn_id_generator.go`.
+- **Phase 2b — path-scoped connection IDs (DONE, pre-existing).**
+  The connection ID manager already maps path IDs to distinct connection IDs
+  via `connIDManager.GetConnIDForPath` / `RetireConnIDForPath` and the
+  `pathProbing` map — built for connection migration, but it already keeps
+  multiple paths' connection IDs (and stateless reset tokens) active
+  simultaneously, which is exactly what multipath needs. Locked in by
+  `TestConnIDManagerMultipathSimultaneousPaths`. No new code required here.
 
 - **Phase 3 — per-path packet number spaces.** Add an AppData PN space per path
   in `internal/ackhandler`; route ACKs per path.
