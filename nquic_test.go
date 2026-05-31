@@ -15,17 +15,18 @@ import (
 // socket with NO TLS configuration and NO certificates, using the experimental
 // TLS-free NQUIC profile, and exchanges data over a stream.
 func TestNQUICEndToEnd(t *testing.T) {
-	// KNOWN LIMITATION (prototype): the server peeks the client's first Initial
-	// CRYPTO frame to extract the TLS SNI (see newSNIReader in transport.go,
-	// baseServer.handleInitialImpl). NQUIC's Initial carries transport
-	// parameters, not a TLS ClientHello, so that peek currently fails with
-	// "not a ClientHello" and the server refuses the connection.
+	// KNOWN LIMITATION (prototype): the initial crypto stream parses the
+	// endpoint's *outgoing* handshake bytes to locate the TLS SNI/ECH
+	// extensions (cryptoStreamImpl.parseSNI -> findSNIAndECH in sni.go, called
+	// from crypto_stream.go). NQUIC writes transport parameters there, not a
+	// TLS ClientHello, so findSNIAndECH fails with "not a ClientHello" and
+	// DialAddr/Accept return that error.
 	//
-	// The fix is a one-line guard in handleInitialImpl: skip the SNI peek when
-	// handshake.IsNQUIC(s.tlsConf). It is intentionally left undone here; the
-	// TLS-free crypto core is fully validated by TestNQUICHandshake in
-	// internal/handshake. See NQUIC.md ("Limitations & next steps").
-	t.Skip("pending SNI-peek guard for NQUIC in transport.go; core validated by internal/handshake/TestNQUICHandshake")
+	// The fix is to create the initial crypto stream with parseSNI=false when
+	// handshake.IsNQUIC(tlsConf) (it is created with parseSNI=true today). It is
+	// intentionally left undone here; the TLS-free crypto core is fully
+	// validated by TestNQUICHandshake in internal/handshake. See NQUIC.md.
+	t.Skip("pending parseSNI=false guard for NQUIC initial crypto stream; core validated by internal/handshake/TestNQUICHandshake")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

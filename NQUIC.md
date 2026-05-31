@@ -106,21 +106,26 @@ go test . -run TestNQUICEndToEnd           # skipped (see below)
   relaxing the `tls.Config != nil` requirement in `transport.go` / `client.go`
   would make the opt-in cleaner; the ALPN approach was chosen here to keep the
   prototype's blast radius small.
-- **Server SNI peek (the one remaining wiring gap).** Before creating a
-  connection, the server peeks the client's first Initial CRYPTO frame to
-  extract the TLS SNI (`newSNIReader` in `transport.go`, used by
-  `baseServer.handleInitialImpl`). NQUIC's Initial carries transport
-  parameters, not a ClientHello, so this peek fails with `not a ClientHello`
-  and the connection is refused. The fix is a one-line guard:
+- **Initial crypto stream SNI/ECH parse (the one remaining wiring gap).** The
+  initial crypto stream parses the endpoint's *outgoing* handshake bytes to
+  locate the TLS SNI and ECH extensions: `cryptoStreamImpl.parseSNI` (a flag
+  documented as "only used for the crypto stream used by the initial packets")
+  drives a call to `findSNIAndECH` (`sni.go`) from `crypto_stream.go`. NQUIC
+  writes transport parameters onto that stream, not a TLS ClientHello, so
+  `findSNIAndECH` returns `not a ClientHello` and `DialAddr` / `Accept` fail
+  with that error.
+
+  The fix is to build the initial crypto stream with `parseSNI=false` for NQUIC
+  (it is created with `parseSNI=true` today):
 
   ```go
-  // in baseServer.handleInitialImpl, around the newSNIReader peek:
-  if !handshake.IsNQUIC(s.tlsConf) {
-      // ... existing SNI extraction ...
-  }
+  // where the initial crypto stream is created in connection.go:
+  newCryptoStream(!handshake.IsNQUIC(tlsConf))   // parseSNI
   ```
 
-  This is why `TestNQUICEndToEnd` is skipped. The change is small but was left
-  undone here because the sandbox this prototype was built in had unreliable
-  file I/O that made a precise edit to `transport.go` unsafe.
+  (equivalently, guard the `findSNIAndECH` call site). This must be done on
+  both client and server initial streams. It is why `TestNQUICEndToEnd` is
+  skipped. The edit is small but was left undone here because the sandbox this
+  prototype was built in had unreliable file I/O that made precise edits to the
+  large `connection.go` / `crypto_stream.go` files unsafe.
 - **No 0-RTT, no session resumption, no key update** in the null profile.
