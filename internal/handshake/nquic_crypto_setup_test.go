@@ -124,9 +124,10 @@ func TestNQUICHandshake(t *testing.T) {
 	_, ok = findEvent(serverEvents, EventHandshakeComplete)
 	require.True(t, ok, "server handshake should complete after the client's finished")
 
-	// 5. Null AEAD: application data travels in cleartext with zero overhead.
-	require.Equal(t, 0, clientSealer.Overhead())
-	require.Equal(t, 0, serverSealer.Overhead())
+	// 5. Null AEAD: payload travels in cleartext, followed by a 16-byte dummy
+	// tag (so packets stay size-compatible with vanilla QUIC; see nquic_aead.go).
+	require.Equal(t, 16, clientSealer.Overhead())
+	require.Equal(t, 16, serverSealer.Overhead())
 
 	const pn = protocol.PacketNumber(42)
 	ad := []byte("associated-data")
@@ -134,7 +135,8 @@ func TestNQUICHandshake(t *testing.T) {
 	// client -> server
 	plaintext := []byte("hello from a NATS client over NQUIC")
 	sealed := clientSealer.Seal(nil, plaintext, pn, ad)
-	require.Equal(t, plaintext, sealed, "null AEAD must not transform the payload")
+	require.Equal(t, len(plaintext)+16, len(sealed))
+	require.Equal(t, plaintext, sealed[:len(plaintext)], "payload travels in cleartext")
 	opened, err := serverOpener.Open(nil, sealed, monotime.Now(), pn, protocol.KeyPhaseZero, ad)
 	require.NoError(t, err)
 	require.Equal(t, plaintext, opened)

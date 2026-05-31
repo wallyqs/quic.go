@@ -1,4 +1,4 @@
-package quic_test
+package quic
 
 import (
 	"context"
@@ -6,30 +6,24 @@ import (
 	"testing"
 	"time"
 
-	"github.com/quic-go/quic-go"
-
 	"github.com/stretchr/testify/require"
 )
 
 // TestNQUICEndToEnd establishes a real QUIC connection over a loopback UDP
 // socket with NO TLS configuration and NO certificates, using the experimental
 // TLS-free NQUIC profile, and exchanges data over a stream.
+//
+// It manages the Transports explicitly (rather than via ListenAddr/DialAddr) so
+// they can be closed before the package's stray-goroutine check in TestMain.
 func TestNQUICEndToEnd(t *testing.T) {
-	// STATUS (prototype): the TLS-free crypto core is validated by
-	// TestNQUICHandshake in internal/handshake (full handshake + null-AEAD data
-	// round trip, no TLS, no certificates). The full socket integration below
-	// does not yet complete: the client's Initial is not padded to the 1200-byte
-	// minimum (vanilla QUIC relies on the large ClientHello for this) and the
-	// handshake-completion timing across the real send/loss-recovery path still
-	// needs work. Skipped so the package stays green and the claim stays honest.
-	// See NQUIC.md ("Status & limitations").
-	t.Skip("NQUIC socket integration incomplete; crypto core covered by internal/handshake/TestNQUICHandshake")
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Server: a certificate-less NQUIC config is all that's required.
-	ln, err := quic.ListenAddr("127.0.0.1:0", quic.NQUICConfig(), nil)
+	// Server transport + listener. A certificate-less NQUIC config is all that's
+	// required — no TLS handshake runs.
+	serverTr := &Transport{Conn: newUDPConnLocalhost(t)}
+	defer serverTr.Close()
+	ln, err := serverTr.Listen(NQUICConfig(), nil)
 	require.NoError(t, err)
 	defer ln.Close()
 
@@ -57,8 +51,10 @@ func TestNQUICEndToEnd(t *testing.T) {
 		}()
 	}()
 
-	// Client: dial with the same TLS-free NQUIC config.
-	conn, err := quic.DialAddr(ctx, ln.Addr().String(), quic.NQUICConfig(), nil)
+	// Client transport. Dial with the same TLS-free NQUIC config.
+	clientTr := &Transport{Conn: newUDPConnLocalhost(t)}
+	defer clientTr.Close()
+	conn, err := clientTr.Dial(ctx, ln.Addr(), NQUICConfig(), nil)
 	require.NoError(t, err)
 	defer conn.CloseWithError(0, "done")
 

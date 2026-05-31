@@ -1,10 +1,10 @@
 # NQUIC — a TLS-free QUIC profile for NATS (prototype)
 
-> **Status:** experimental prototype. The TLS-free crypto core works at the unit
-> level (see `TestNQUICHandshake`); the full socket integration is not yet
-> complete (`TestNQUICEndToEnd` is skipped). The "null" security model provides
-> **no confidentiality** and **no authentication** at the transport layer — use
-> only on fully trusted networks.
+> **Status:** working experimental prototype. A real QUIC connection is
+> established over UDP with **no TLS and no certificates**, and data round-trips
+> over a stream (`TestNQUICEndToEnd`). The "null" security model provides **no
+> confidentiality** and **no authentication** at the transport layer — use only
+> on fully trusted networks.
 
 ## Motivation
 
@@ -57,17 +57,16 @@ NQUIC is therefore implemented as an alternative `CryptoSetup`:
   parameters:
 
   ```
-  client                                   server
-  ----- Initial[CRYPTO: client TPs] ----->
-  <---- Initial[CRYPTO: server TPs] -------
-  <---- 1-RTT[HANDSHAKE_DONE, ...] --------
+  client                                       server
+  ----- Initial   [CRYPTO: client TPs] ------>
+  <----- Initial  [CRYPTO: server TPs] -------
+  ----- Handshake [CRYPTO: "finished"] ------>
+  <----- 1-RTT    [HANDSHAKE_DONE, ...] ------
   ```
 
-  Both sides install null 1-RTT keys as soon as parameters are exchanged and
-  emit `EventHandshakeComplete`; there is no key exchange to perform.
-
-A few small changes in the connection layer were needed to support a profile
-that skips the Handshake encryption level (see "End-to-end wiring" below).
+  The Handshake "finished" round trip mirrors TLS ordering so the server only
+  completes after its Initial reply has been sent. There is no key exchange to
+  perform; keys are the null AEAD (see "How it completes over the wire").
 
 ## Selecting NQUIC
 
@@ -85,69 +84,58 @@ the connection constructors in `connection.go` route to the NQUIC crypto setup
 instead of the TLS one. No TLS handshake runs and no certificate is required;
 the `tls.Config` is only a carrier for the toggle.
 
-## End-to-end wiring
-
-Beyond the `CryptoSetup` implementation, three small integration points were
-required because NQUIC sends no ClientHello and skips the Handshake space:
-
-1. **ClientHello scrambling** (`crypto_stream.go`,
-   `initialCryptoStream.disableScrambling`). The client normally scrambles its
-   ClientHello, which runs `findSNIAndECH` (`sni.go`) over the outgoing Initial
-   CRYPTO bytes. NQUIC writes transport parameters there, not a ClientHello, so
-   scrambling is disabled for NQUIC clients in `connection.go`.
-
-2. **NQUIC routing** (`connection.go`). The client/server connection
-   constructors select `handshake.NewNQUICCryptoSetup{Client,Server}` when
-   `handshake.IsNQUIC(tlsConf)`.
-
-3. **Handshake packet-number space** (`internal/ackhandler/received_packet_handler.go`).
-   The `EncryptionHandshake` case is guarded with a `nil` check, mirroring the
-   existing `initialPackets` guard. NQUIC transitions Initial → 1-RTT and never
-   installs Handshake keys, so the Handshake space is dropped and the
-   previously-"impossible" case becomes reachable.
-
 ## Status & tests
 
-- **Crypto core — works.** `internal/handshake/nquic_crypto_setup_test.go`
+- **Crypto core.** `internal/handshake/nquic_crypto_setup_test.go`
   (`TestNQUICHandshake`) drives a client and a server `nquicSetup` through the
   full event/message loop with **no TLS and no certificates**, exercises the
-  Initial → Handshake → 1-RTT key progression, and round-trips application data
-  through the null AEAD. This is the proof that QUIC's transport can run without
-  TLS via the `CryptoSetup` seam.
+  Initial -> Handshake -> 1-RTT key progression, and round-trips application
+  data through the null AEAD.
 
-  ```
-  go test ./internal/handshake/ -run NQUIC   # passes
-  ```
+- **Socket end-to-end.** `nquic_test.go` (`TestNQUICEndToEnd`) stands up a real
+  connection over a loopback UDP socket with `quic.NQUICConfig()` (no certs),
+  opens a stream, and verifies an echo. **This passes.**
 
-- **Socket end-to-end — incomplete.** `nquic_test.go` (`TestNQUICEndToEnd`)
-  stands up a real connection over a loopback UDP socket with
-  `quic.NQUICConfig()`. It is currently **`t.Skip`-ped**: the handshake does not
-  yet complete over the real send / loss-recovery path. Two concrete gaps remain
-  (see below). It is skipped rather than deleted so the intended shape is
-  documented and the package stays green.
+```
+go test ./internal/handshake/ -run NQUIC   # passes
+go test . -run TestNQUICEndToEnd           # passes
+```
 
-  ```
-  go test . -run TestNQUICEndToEnd           # skipped
-  ```
+## How it completes over the wire
+
+Three integration points beyond the `CryptoSetup` make the real handshake work:
+
+1. **ClientHello scrambling disabled** (`crypto_stream.go`,
+   `initialCryptoStream.disableScrambling`, wired in `connection.go`). The
+   client otherwise runs `findSNIAndECH` over its outgoing Initial CRYPTO bytes,
+   which are transport parameters in NQUIC, not a ClientHello.
+
+2. **A Handshake-level "finished" round trip** (`nquic_crypto_setup.go`). The
+   handshake is Initial(params) both ways, then a client Handshake "finished",
+   then completion. This mirrors TLS ordering so the server only completes after
+   its Initial reply has been sent (otherwise it would drop Initial keys before
+   replying and the client would hang).
+
+3. **16-byte dummy AEAD tag** (`nquic_aead.go`). QUIC header protection samples
+   16 bytes starting 4 bytes into the packet-number field, so the receiver needs
+   >= 4+16 bytes of protected payload. Real AEADs satisfy this via their auth
+   tag; the null AEAD appends 16 zero bytes (no real authentication) so small
+   packets (ACKs, the "finished") are not dropped as "packet too small".
+
+A nil-guard was also added to the Initial packet-number space in
+`internal/ackhandler/received_packet_handler.go`: NQUIC can confirm the
+handshake (dropping the Initial space) while still processing an Initial packet,
+a sequencing that standard QUIC never produces.
 
 ## Limitations & next steps
 
-- **Socket integration is unfinished.** Observed with debug logging:
-  - The client's Initial packet is **not padded to the 1200-byte minimum**
-    (RFC 9000 §14.1). Vanilla QUIC gets this padding "for free" because the
-    ClientHello is large; NQUIC's transport-parameter Initial is ~45 bytes, so
-    the padding has to be requested explicitly.
-  - Handshake-completion / key-drop timing across the real packer and
-    loss-recovery path still needs work; the in-memory `CryptoSetup` event
-    sequence is correct (covered by `TestNQUICHandshake`), but the connection
-    layer doesn't yet drive it to completion over the wire.
 - **Null profile only.** No confidentiality/authentication at the transport
   layer; suitable for trusted networks where NATS handles auth. An obvious next
-  step is an `ephemeral-ECDH, no-PKI` profile (X25519 in the Initial exchange →
-  HKDF → real AEAD) that keeps confidentiality and forward secrecy while still
+  step is an `ephemeral-ECDH, no-PKI` profile (X25519 in the Initial exchange ->
+  HKDF -> real AEAD) that keeps confidentiality and forward secrecy while still
   dropping certificates — it slots into the same `CryptoSetup` seam.
 - **ALPN-gated toggle.** A first-class `Config` option (e.g. `EnableNQUIC`) and
   relaxing the `tls.Config != nil` requirement in `transport.go` / `client.go`
-  would make the opt-in cleaner; the ALPN approach was chosen here to keep the
-  prototype's blast radius small.
+  would make the opt-in cleaner; the ALPN approach keeps the prototype's blast
+  radius small.
 - **No 0-RTT, no session resumption, no key update** in the null profile.
