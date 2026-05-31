@@ -64,6 +64,9 @@ NQUIC is therefore implemented as an alternative `CryptoSetup`:
   Both sides install null 1-RTT keys as soon as parameters are exchanged and
   emit `EventHandshakeComplete`; there is no key exchange to perform.
 
+A few small changes in the connection layer were needed to support a profile
+that skips the Handshake encryption level (see "End-to-end wiring" below).
+
 ## Selecting NQUIC
 
 To avoid adding new public surface, NQUIC is opted into via an ALPN sentinel in
@@ -75,24 +78,44 @@ ln, _   := quic.ListenAddr("127.0.0.1:4222", quic.NQUICConfig(), nil)
 conn, _ := quic.DialAddr(ctx, "127.0.0.1:4222", quic.NQUICConfig(), nil)
 ```
 
-When `tls.Config.NextProtos` contains `quic.NQUICNextProto`
-(`"nquic-null/v1"`), the connection constructors in `connection.go` route to the
-NQUIC crypto setup instead of the TLS one. No TLS handshake runs and no
-certificate is required; the `tls.Config` is only a carrier for the toggle.
+When `tls.Config.NextProtos` contains `quic.NQUICNextProto` (`"nquic-null/v1"`),
+the connection constructors in `connection.go` route to the NQUIC crypto setup
+instead of the TLS one. No TLS handshake runs and no certificate is required;
+the `tls.Config` is only a carrier for the toggle.
+
+## End-to-end wiring
+
+Beyond the `CryptoSetup` implementation, three small integration points were
+required because NQUIC sends no ClientHello and skips the Handshake space:
+
+1. **ClientHello scrambling** (`crypto_stream.go`,
+   `initialCryptoStream.disableScrambling`). The client normally scrambles its
+   ClientHello, which runs `findSNIAndECH` (`sni.go`) over the outgoing Initial
+   CRYPTO bytes. NQUIC writes transport parameters there, not a ClientHello, so
+   scrambling is disabled for NQUIC clients in `connection.go`.
+
+2. **NQUIC routing** (`connection.go`). The client/server connection
+   constructors select `handshake.NewNQUICCryptoSetup{Client,Server}` when
+   `handshake.IsNQUIC(tlsConf)`.
+
+3. **Handshake packet-number space** (`internal/ackhandler/received_packet_handler.go`).
+   The `EncryptionHandshake` case is guarded with a `nil` check, mirroring the
+   existing `initialPackets` guard. NQUIC transitions Initial → 1-RTT and never
+   installs Handshake keys, so the Handshake space is dropped and the
+   previously-"impossible" case becomes reachable.
 
 ## Tests
 
-- `internal/handshake/nquic_crypto_setup_test.go` drives two `nquicSetup`
-  instances through the full event/message loop and verifies the null 1-RTT
-  AEAD round-trips application data.
-- `nquic_test.go` (`TestNQUICEndToEnd`) drives a **real** QUIC connection over a
-  loopback UDP socket with **no TLS config and no certificates**. It is
-  currently `t.Skip`-ped pending the SNI-peek guard described below; the
-  TLS-free crypto core it depends on is fully validated by the handshake test.
+- `internal/handshake/nquic_crypto_setup_test.go` (`TestNQUICHandshake`) drives
+  two `nquicSetup` instances through the full event/message loop and verifies
+  the null 1-RTT AEAD round-trips application data.
+- `nquic_test.go` (`TestNQUICEndToEnd`) opens a **real** QUIC connection over a
+  loopback UDP socket with **no TLS config and no certificates**, opens a
+  stream, and verifies an echo. **This passes.**
 
 ```
 go test ./internal/handshake/ -run NQUIC   # passes
-go test . -run TestNQUICEndToEnd           # skipped (see below)
+go test . -run TestNQUICEndToEnd           # passes
 ```
 
 ## Limitations & next steps
@@ -106,26 +129,6 @@ go test . -run TestNQUICEndToEnd           # skipped (see below)
   relaxing the `tls.Config != nil` requirement in `transport.go` / `client.go`
   would make the opt-in cleaner; the ALPN approach was chosen here to keep the
   prototype's blast radius small.
-- **Initial crypto stream SNI/ECH parse (the one remaining wiring gap).** The
-  initial crypto stream parses the endpoint's *outgoing* handshake bytes to
-  locate the TLS SNI and ECH extensions: `cryptoStreamImpl.parseSNI` (a flag
-  documented as "only used for the crypto stream used by the initial packets")
-  drives a call to `findSNIAndECH` (`sni.go`) from `crypto_stream.go`. NQUIC
-  writes transport parameters onto that stream, not a TLS ClientHello, so
-  `findSNIAndECH` returns `not a ClientHello` and `DialAddr` / `Accept` fail
-  with that error.
-
-  The fix is to build the initial crypto stream with `parseSNI=false` for NQUIC
-  (it is created with `parseSNI=true` today):
-
-  ```go
-  // where the initial crypto stream is created in connection.go:
-  newCryptoStream(!handshake.IsNQUIC(tlsConf))   // parseSNI
-  ```
-
-  (equivalently, guard the `findSNIAndECH` call site). This must be done on
-  both client and server initial streams. It is why `TestNQUICEndToEnd` is
-  skipped. The edit is small but was left undone here because the sandbox this
-  prototype was built in had unreliable file I/O that made precise edits to the
-  large `connection.go` / `crypto_stream.go` files unsafe.
 - **No 0-RTT, no session resumption, no key update** in the null profile.
+- **qlog / ConnectionState** are minimal for NQUIC connections (no TLS state to
+  report).
