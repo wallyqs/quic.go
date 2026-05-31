@@ -6,6 +6,11 @@
 > confidentiality** and **no authentication** at the transport layer — use only
 > on fully trusted networks.
 
+> 📊 **Illustrated design overview:** [`docs/nquic.html`](docs/nquic.html) — a
+> self-contained HTML page with inline SVG diagrams of the stack, the
+> `CryptoSetup` seam, the handshake sequence, the null AEAD, and the NATS demo.
+
+
 ## Motivation
 
 [QUIC](https://datatracker.ietf.org/doc/html/rfc9000) mandates TLS 1.3

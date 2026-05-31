@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NQUIC — a TLS-free QUIC profile for NATS</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --ink:#e6edf3; --muted:#9aa7b4;
+    --line:#30363d; --accent:#58a6ff; --accent2:#7ee787; --warn:#f0883e; --danger:#ff7b72;
+    --violet:#bc8cff; --teal:#39d0d8; --mono:"SFMono-Regular",ui-monospace,"JetBrains Mono",Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6;font-size:16px}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,kbd{font-family:var(--mono);font-size:.88em}
+  code{background:#21262d;border:1px solid var(--line);border-radius:5px;padding:.08em .4em}
+  .wrap{max-width:1040px;margin:0 auto;padding:0 24px}
+
+  /* hero */
+  header.hero{position:relative;overflow:hidden;border-bottom:1px solid var(--line);
+    background:radial-gradient(1200px 500px at 80% -10%,rgba(88,166,255,.18),transparent 60%),
+               radial-gradient(900px 500px at 0% 0%,rgba(126,231,135,.10),transparent 55%),var(--bg)}
+  .hero .wrap{padding:54px 24px 40px}
+  .badge{display:inline-flex;align-items:center;gap:8px;background:#11261b;border:1px solid #1f6f37;
+    color:var(--accent2);font-size:13px;font-weight:600;padding:5px 12px;border-radius:999px;letter-spacing:.2px}
+  .badge .dot{width:8px;height:8px;border-radius:50%;background:var(--accent2);box-shadow:0 0 10px var(--accent2)}
+  h1{font-size:46px;line-height:1.05;margin:18px 0 8px;letter-spacing:-1px}
+  h1 .grad{background:linear-gradient(92deg,var(--accent),var(--teal) 50%,var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .tagline{font-size:19px;color:var(--muted);max-width:760px;margin:0}
+  .hero-meta{margin-top:22px;display:flex;flex-wrap:wrap;gap:10px}
+  .chip{font-size:13px;color:var(--muted);background:var(--panel);border:1px solid var(--line);
+    border-radius:8px;padding:7px 12px;display:inline-flex;gap:7px;align-items:center}
+  .chip b{color:var(--ink);font-weight:600}
+
+  section{padding:46px 0;border-bottom:1px solid var(--line)}
+  h2{font-size:28px;margin:0 0 6px;letter-spacing:-.4px;display:flex;align-items:center;gap:12px}
+  h2 .num{font-family:var(--mono);font-size:15px;color:var(--accent);background:#0e2233;border:1px solid #1c405e;
+    border-radius:8px;padding:3px 9px}
+  .lead{color:var(--muted);font-size:17px;margin:0 0 26px;max-width:820px}
+  h3{font-size:18px;margin:28px 0 10px}
+  p{margin:0 0 14px}
+  ul{margin:0 0 14px;padding-left:22px}
+  li{margin:6px 0}
+  .muted{color:var(--muted)}
+
+  .fig{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;margin:20px 0;
+    box-shadow:0 1px 0 rgba(255,255,255,.02) inset}
+  .fig svg{display:block;width:100%;height:auto}
+  .cap{color:var(--muted);font-size:13.5px;margin-top:12px;text-align:center}
+  .cap b{color:var(--ink)}
+
+  /* table */
+  table{width:100%;border-collapse:collapse;margin:18px 0;font-size:15px;overflow:hidden;border-radius:12px;border:1px solid var(--line)}
+  th,td{padding:12px 14px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  thead th{background:var(--panel2);font-size:13px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+  tbody tr:last-child td{border-bottom:none}
+  td.same{color:var(--accent2)} td.diff{color:var(--warn)}
+  tbody tr:nth-child(even){background:rgba(255,255,255,.015)}
+
+  /* code block */
+  pre{background:#0b0f14;border:1px solid var(--line);border-radius:12px;padding:16px 18px;overflow:auto;
+    font-family:var(--mono);font-size:13.5px;line-height:1.55;margin:16px 0}
+  pre .k{color:var(--violet)} pre .s{color:var(--accent2)} pre .c{color:#6e7781} pre .f{color:var(--accent)} pre .t{color:var(--teal)}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}h1{font-size:34px}}
+
+  .callout{border-radius:12px;padding:16px 18px;margin:18px 0;border:1px solid}
+  .callout.warn{background:#2a1d10;border-color:#5a3a1c;color:#f3c79a}
+  .callout.info{background:#0e2233;border-color:#1c405e;color:#bcdcff}
+  .callout.good{background:#11261b;border-color:#1f6f37;color:#bff3cb}
+  .callout b{color:#fff}
+
+  .pill{display:inline-block;font-family:var(--mono);font-size:12px;padding:2px 8px;border-radius:6px;border:1px solid var(--line)}
+  .pill.tls{background:#2a1216;border-color:#62272c;color:#ff9aa2}
+  .pill.nquic{background:#11261b;border-color:#1f6f37;color:var(--accent2)}
+
+  footer{padding:34px 0 60px;color:var(--muted);font-size:14px}
+  .toc{display:flex;flex-wrap:wrap;gap:8px;margin-top:24px}
+  .toc a{font-size:13.5px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 12px;color:var(--muted)}
+  .toc a:hover{color:var(--ink);border-color:var(--accent);text-decoration:none}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;justify-content:center;margin-top:6px;font-size:12.5px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:12px;height:12px;border-radius:3px;display:inline-block}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="badge"><span class="dot"></span>WORKING PROTOTYPE</span>
+    <h1>NQUIC — <span class="grad">QUIC without TLS</span>,<br>for NATS</h1>
+    <p class="tagline">A QUIC profile that keeps the entire transport — streams, flow control, loss
+      recovery, migration — but removes the mandatory TLS&nbsp;1.3 handshake and X.509 certificates.
+      Built as a single alternative <code>CryptoSetup</code> inside quic-go.</p>
+    <div class="hero-meta">
+      <span class="chip"><b>No TLS</b> · no certificates</span>
+      <span class="chip"><b>RFC 9000</b> transport, unchanged</span>
+      <span class="chip"><b>1</b> interface swapped</span>
+      <span class="chip"><b>e2e</b> verified over UDP</span>
+    </div>
+    <nav class="toc">
+      <a href="#why">Why</a>
+      <a href="#seam">The seam</a>
+      <a href="#layers">Encryption levels</a>
+      <a href="#handshake">Handshake</a>
+      <a href="#aead">Null AEAD &amp; the tag</a>
+      <a href="#wire">Wire fixes</a>
+      <a href="#nats">NATS demo</a>
+      <a href="#api">API</a>
+      <a href="#limits">Limitations</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+<!-- ───────────────────────── WHY ───────────────────────── -->
+<section id="why">
+  <h2><span class="num">01</span> Why decouple QUIC from TLS?</h2>
+  <p class="lead">QUIC (RFC 9000) mandates TLS 1.3 (RFC 9001): every connection runs a TLS handshake and
+    derives its packet-protection keys from the TLS key schedule. That coupling drags X.509 certificates and a PKI
+    into every deployment.</p>
+  <p>NATS already has its own security model — nkeys, JWTs, tokens — and is frequently run inside a trusted
+    boundary (a supercluster in a VPC or service mesh). There, certificate machinery is pure operational overhead,
+    yet QUIC's transport features remain valuable. <b>NQUIC keeps the transport and replaces only key
+    establishment.</b></p>
+
+  <div class="fig">
+    <svg viewBox="0 0 920 240" role="img" aria-label="Standard QUIC stack versus NQUIC stack">
+      <defs>
+        <linearGradient id="gTrans" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#16324a"/><stop offset="1" stop-color="#102536"/>
+        </linearGradient>
+      </defs>
+      <!-- Standard QUIC -->
+      <text x="20" y="26" fill="#9aa7b4" font-size="13" font-family="ui-monospace,Consolas,monospace">STANDARD QUIC</text>
+      <rect x="20" y="40" width="400" height="40" rx="8" fill="#2a1216" stroke="#62272c"/>
+      <text x="220" y="65" fill="#ff9aa2" font-size="14" text-anchor="middle" font-weight="600">TLS 1.3 · X.509 certificates · PKI</text>
+
+      <rect x="20" y="92" width="400" height="40" rx="8" fill="url(#gTrans)" stroke="#1c405e"/>
+      <text x="220" y="117" fill="#bcdcff" font-size="14" text-anchor="middle">key schedule → AEAD keys</text>
+
+      <rect x="20" y="144" width="400" height="74" rx="8" fill="#11261b" stroke="#1f6f37"/>
+      <text x="220" y="170" fill="#bff3cb" font-size="14" text-anchor="middle" font-weight="600">QUIC transport</text>
+      <text x="220" y="192" fill="#7fbf95" font-size="12" text-anchor="middle">streams · flow control · loss recovery · migration</text>
+
+      <!-- arrow -->
+      <g stroke="#9aa7b4" stroke-width="2" fill="none">
+        <path d="M448 129 L472 129" marker-end="url(#ah)"/>
+      </g>
+      <marker id="ah" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
+        <path d="M0,0 L7,3 L0,6 Z" fill="#9aa7b4"/>
+      </marker>
+
+      <!-- NQUIC -->
+      <text x="500" y="26" fill="#9aa7b4" font-size="13" font-family="ui-monospace,Consolas,monospace">NQUIC</text>
+      <rect x="500" y="40" width="400" height="40" rx="8" fill="#11261b" stroke="#1f6f37" stroke-dasharray="5 4"/>
+      <text x="700" y="60" fill="#7ee787" font-size="13" text-anchor="middle" font-weight="600">transport-parameter exchange</text>
+      <text x="700" y="74" fill="#7fbf95" font-size="11" text-anchor="middle">(no certs · no key exchange)</text>
+
+      <rect x="500" y="92" width="400" height="40" rx="8" fill="#1c1322" stroke="#4a2d63"/>
+      <text x="700" y="117" fill="#d6b8ff" font-size="14" text-anchor="middle">null AEAD (cleartext + 16-byte tag)</text>
+
+      <rect x="500" y="144" width="400" height="74" rx="8" fill="#11261b" stroke="#1f6f37"/>
+      <text x="700" y="170" fill="#bff3cb" font-size="14" text-anchor="middle" font-weight="600">QUIC transport</text>
+      <text x="700" y="192" fill="#7fbf95" font-size="12" text-anchor="middle">streams · flow control · loss recovery · migration</text>
+      <text x="700" y="210" fill="#566" font-size="11" text-anchor="middle" font-style="italic">— byte-for-byte identical —</text>
+    </svg>
+    <div class="cap"><b>Figure 1.</b> Only the top two layers change. The transport — the hard, valuable part — is untouched.</div>
+  </div>
+</section>
+
+<!-- ───────────────────────── SEAM ───────────────────────── -->
+<section id="seam">
+  <h2><span class="num">02</span> The seam: one interface</h2>
+  <p class="lead">quic-go hides <em>all</em> of its TLS coupling behind a single interface,
+    <code>handshake.CryptoSetup</code>. The connection run-loop only ever talks to that interface; packet
+    protection, HKDF, the CRYPTO-frame plumbing and transport-parameter handling are already TLS-agnostic.</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 920 360" role="img" aria-label="CryptoSetup interface as the swap point">
+      <!-- connection box -->
+      <rect x="300" y="20" width="320" height="64" rx="10" fill="#161b22" stroke="#30363d"/>
+      <text x="460" y="48" fill="#e6edf3" font-size="15" text-anchor="middle" font-weight="600">connection run-loop</text>
+      <text x="460" y="68" fill="#9aa7b4" font-size="12" text-anchor="middle">packer · unpacker · ack handler · streams</text>
+
+      <!-- interface bar -->
+      <rect x="210" y="120" width="500" height="52" rx="10" fill="#0e2233" stroke="#58a6ff"/>
+      <text x="460" y="143" fill="#58a6ff" font-size="14" text-anchor="middle" font-weight="700" font-family="ui-monospace,Consolas,monospace">handshake.CryptoSetup  (interface)</text>
+      <text x="460" y="161" fill="#7fb3e8" font-size="11.5" text-anchor="middle" font-family="ui-monospace,Consolas,monospace">StartHandshake · HandleMessage · NextEvent · Get{Initial,Handshake,1RTT}{Sealer,Opener}</text>
+
+      <!-- connector -->
+      <line x1="460" y1="84" x2="460" y2="120" stroke="#30363d" stroke-width="2"/>
+
+      <!-- two implementations -->
+      <line x1="330" y1="172" x2="330" y2="210" stroke="#30363d" stroke-width="2"/>
+      <line x1="590" y1="172" x2="590" y2="210" stroke="#30363d" stroke-width="2"/>
+
+      <rect x="120" y="210" width="420" height="120" rx="10" fill="#1a1012" stroke="#62272c"/>
+      <text x="330" y="236" fill="#ff9aa2" font-size="14" text-anchor="middle" font-weight="600">cryptoSetup  (TLS)</text>
+      <text x="330" y="260" fill="#cf9aa0" font-size="12" text-anchor="middle">crypto/tls QUICConn</text>
+      <text x="330" y="280" fill="#cf9aa0" font-size="12" text-anchor="middle">TLS 1.3 handshake → traffic secrets</text>
+      <text x="330" y="300" fill="#cf9aa0" font-size="12" text-anchor="middle">HKDF → AES-GCM / ChaCha20</text>
+      <text x="330" y="320" fill="#8a6a6e" font-size="11" text-anchor="middle">needs certificate(s)</text>
+
+      <rect x="560" y="210" width="300" height="120" rx="10" fill="#11261b" stroke="#1f6f37"/>
+      <text x="710" y="236" fill="#7ee787" font-size="14" text-anchor="middle" font-weight="600">nquicSetup  (NQUIC)</text>
+      <text x="710" y="260" fill="#9fd9af" font-size="12" text-anchor="middle">transport-param exchange</text>
+      <text x="710" y="280" fill="#9fd9af" font-size="12" text-anchor="middle">null AEAD (no key exchange)</text>
+      <text x="710" y="300" fill="#9fd9af" font-size="12" text-anchor="middle">Initial keys = conn-ID derived</text>
+      <text x="710" y="320" fill="#6f9a7c" font-size="11" text-anchor="middle">needs nothing</text>
+
+      <text x="460" y="352" fill="#9aa7b4" font-size="12.5" text-anchor="middle" font-style="italic">selected at connection construction via the ALPN in tls.Config</text>
+    </svg>
+    <div class="cap"><b>Figure 2.</b> NQUIC is a sibling implementation of the same interface — everything above the bar is reused.</div>
+  </div>
+
+  <div class="callout info">The Initial encryption level already derives its keys deterministically from the
+    Destination Connection ID (RFC 9001 §5.2) and never needed TLS — so NQUIC reuses the <em>standard</em> Initial
+    AEAD to protect the transport-parameter exchange.</div>
+</section>
+
+<!-- ───────────────────────── LAYERS ───────────────────────── -->
+<section id="layers">
+  <h2><span class="num">03</span> Encryption levels: what each one uses</h2>
+  <p class="lead">QUIC has four key "levels". NQUIC keeps Initial exactly as standard QUIC, uses a trivial null
+    AEAD for Handshake and 1-RTT, and never does a key exchange.</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 920 250" role="img" aria-label="Encryption levels in standard QUIC vs NQUIC">
+      <!-- columns header -->
+      <text x="150" y="28" fill="#9aa7b4" font-size="13" text-anchor="middle" font-family="ui-monospace,Consolas,monospace">INITIAL</text>
+      <text x="370" y="28" fill="#9aa7b4" font-size="13" text-anchor="middle" font-family="ui-monospace,Consolas,monospace">HANDSHAKE</text>
+      <text x="590" y="28" fill="#9aa7b4" font-size="13" text-anchor="middle" font-family="ui-monospace,Consolas,monospace">0-RTT</text>
+      <text x="800" y="28" fill="#9aa7b4" font-size="13" text-anchor="middle" font-family="ui-monospace,Consolas,monospace">1-RTT (app data)</text>
+
+      <!-- standard row -->
+      <text x="20" y="78" fill="#9aa7b4" font-size="12">STD</text>
+      <rect x="60" y="48" width="180" height="46" rx="8" fill="url(#gTrans)" stroke="#1c405e"/>
+      <text x="150" y="70" fill="#bcdcff" font-size="12" text-anchor="middle">conn-ID AES-GCM</text>
+      <text x="150" y="86" fill="#7fa8cc" font-size="10.5" text-anchor="middle">(no TLS)</text>
+      <rect x="280" y="48" width="180" height="46" rx="8" fill="#2a1216" stroke="#62272c"/>
+      <text x="370" y="74" fill="#ff9aa2" font-size="12" text-anchor="middle">TLS-derived AEAD</text>
+      <rect x="500" y="48" width="180" height="46" rx="8" fill="#2a1216" stroke="#62272c"/>
+      <text x="590" y="74" fill="#ff9aa2" font-size="12" text-anchor="middle">TLS-derived AEAD</text>
+      <rect x="710" y="48" width="180" height="46" rx="8" fill="#2a1216" stroke="#62272c"/>
+      <text x="800" y="74" fill="#ff9aa2" font-size="12" text-anchor="middle">TLS-derived AEAD</text>
+
+      <!-- nquic row -->
+      <text x="20" y="168" fill="#7ee787" font-size="12">NQUIC</text>
+      <rect x="60" y="138" width="180" height="46" rx="8" fill="url(#gTrans)" stroke="#1c405e"/>
+      <text x="150" y="160" fill="#bcdcff" font-size="12" text-anchor="middle">conn-ID AES-GCM</text>
+      <text x="150" y="176" fill="#7fa8cc" font-size="10.5" text-anchor="middle">identical ✓</text>
+      <rect x="280" y="138" width="180" height="46" rx="8" fill="#1c1322" stroke="#4a2d63"/>
+      <text x="370" y="164" fill="#d6b8ff" font-size="12" text-anchor="middle">null AEAD</text>
+      <text x="370" y="180" fill="#a98cc4" font-size="10.5" text-anchor="middle">"finished" only</text>
+      <rect x="500" y="138" width="180" height="46" rx="8" fill="#15191f" stroke="#30363d" stroke-dasharray="5 4"/>
+      <text x="590" y="166" fill="#6e7781" font-size="12" text-anchor="middle">— not used —</text>
+      <rect x="710" y="138" width="180" height="46" rx="8" fill="#1c1322" stroke="#4a2d63"/>
+      <text x="800" y="166" fill="#d6b8ff" font-size="12" text-anchor="middle">null AEAD (cleartext)</text>
+
+      <line x1="60" y1="212" x2="890" y2="212" stroke="#30363d"/>
+      <text x="60" y="234" fill="#9aa7b4" font-size="12">Keys derived from</text>
+      <text x="250" y="234" fill="#bcdcff" font-size="12">connection ID</text>
+      <text x="430" y="234" fill="#d6b8ff" font-size="12">constants (no secret)</text>
+      <text x="800" y="234" fill="#d6b8ff" font-size="12" text-anchor="middle">constants (no secret)</text>
+    </svg>
+    <div class="cap"><b>Figure 3.</b> Initial is shared with standard QUIC; Handshake &amp; 1-RTT become the null AEAD; 0-RTT is unused.</div>
+  </div>
+
+  <table>
+    <thead><tr><th>Aspect</th><th>Standard QUIC</th><th>NQUIC (null profile)</th></tr></thead>
+    <tbody>
+      <tr><td>Packet headers, frames, varints</td><td class="same">RFC 9000</td><td class="same">unchanged</td></tr>
+      <tr><td>Streams, flow control, loss recovery, migration</td><td class="same">RFC 9000/9002</td><td class="same">unchanged</td></tr>
+      <tr><td>Handshake</td><td class="diff">TLS 1.3 (certs, key exchange)</td><td>transport-parameter exchange only</td></tr>
+      <tr><td>Initial packets</td><td class="same">conn-ID–derived AES-GCM</td><td class="same">conn-ID–derived AES-GCM</td></tr>
+      <tr><td>1-RTT (application data)</td><td class="diff">TLS-derived AEAD</td><td><b>null AEAD (cleartext)</b></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ───────────────────────── HANDSHAKE ───────────────────────── -->
+<section id="handshake">
+  <h2><span class="num">04</span> The handshake, step by step</h2>
+  <p class="lead">There's no key exchange to perform — the only job is to carry QUIC transport parameters and to
+    drive the connection's key-drop / confirmation machinery in the same order TLS would.</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 920 430" role="img" aria-label="NQUIC handshake sequence diagram">
+      <!-- lifelines -->
+      <text x="180" y="28" fill="#7ee787" font-size="15" text-anchor="middle" font-weight="700">CLIENT</text>
+      <text x="740" y="28" fill="#58a6ff" font-size="15" text-anchor="middle" font-weight="700">SERVER</text>
+      <line x1="180" y1="40" x2="180" y2="400" stroke="#2c3340" stroke-width="2"/>
+      <line x1="740" y1="40" x2="740" y2="400" stroke="#2c3340" stroke-width="2"/>
+
+      <defs>
+        <marker id="arr" markerWidth="11" markerHeight="11" refX="8" refY="3.5" orient="auto">
+          <path d="M0,0 L9,3.5 L0,7 Z" fill="#c9d1d9"/>
+        </marker>
+      </defs>
+
+      <!-- 1 client initial -->
+      <g font-family="ui-monospace,Consolas,monospace" font-size="12">
+        <rect x="120" y="56" width="120" height="20" rx="5" fill="#11261b" stroke="#1f6f37"/>
+        <text x="180" y="70" fill="#7ee787" text-anchor="middle">INITIAL</text>
+        <line x1="180" y1="86" x2="738" y2="86" stroke="#c9d1d9" stroke-width="1.6" marker-end="url(#arr)"/>
+        <text x="460" y="80" fill="#c9d1d9" text-anchor="middle">CRYPTO: client transport params</text>
+      </g>
+
+      <!-- 2 server initial -->
+      <g font-family="ui-monospace,Consolas,monospace" font-size="12">
+        <rect x="680" y="104" width="120" height="20" rx="5" fill="#0e2233" stroke="#1c405e"/>
+        <text x="740" y="118" fill="#58a6ff" text-anchor="middle">INITIAL</text>
+        <line x1="740" y1="134" x2="182" y2="134" stroke="#c9d1d9" stroke-width="1.6" marker-end="url(#arr)"/>
+        <text x="460" y="128" fill="#c9d1d9" text-anchor="middle">CRYPTO: server transport params</text>
+      </g>
+      <text x="460" y="158" fill="#9aa7b4" font-size="11.5" text-anchor="middle" font-style="italic">both sides install Handshake + 1-RTT (null) keys — no secret to derive</text>
+
+      <!-- 3 client handshake finished -->
+      <g font-family="ui-monospace,Consolas,monospace" font-size="12">
+        <rect x="110" y="180" width="140" height="20" rx="5" fill="#1c1322" stroke="#4a2d63"/>
+        <text x="180" y="194" fill="#d6b8ff" text-anchor="middle">HANDSHAKE</text>
+        <line x1="180" y1="210" x2="738" y2="210" stroke="#c9d1d9" stroke-width="1.6" marker-end="url(#arr)"/>
+        <text x="460" y="204" fill="#c9d1d9" text-anchor="middle">CRYPTO: "finished"  (NQUIC-FIN/1)</text>
+      </g>
+      <!-- client drops initial -->
+      <rect x="60" y="224" width="240" height="22" rx="5" fill="#221a10" stroke="#5a3a1c"/>
+      <text x="180" y="239" fill="#f0c79a" font-size="11" text-anchor="middle">client drops Initial keys (RFC 9001 §4.9.1)</text>
+      <!-- client complete -->
+      <rect x="80" y="252" width="200" height="22" rx="5" fill="#11261b" stroke="#1f6f37"/>
+      <text x="180" y="267" fill="#7ee787" font-size="11" text-anchor="middle">✓ client handshake complete</text>
+
+      <!-- 4 server completes on finished -->
+      <rect x="600" y="224" width="280" height="22" rx="5" fill="#0e2233" stroke="#1c405e"/>
+      <text x="740" y="239" fill="#bcdcff" font-size="11" text-anchor="middle">server completes on receiving "finished"</text>
+
+      <!-- 5 server 1-rtt handshake_done -->
+      <g font-family="ui-monospace,Consolas,monospace" font-size="12">
+        <rect x="690" y="290" width="100" height="20" rx="5" fill="#1c1322" stroke="#4a2d63"/>
+        <text x="740" y="304" fill="#d6b8ff" text-anchor="middle">1-RTT</text>
+        <line x1="740" y1="320" x2="182" y2="320" stroke="#c9d1d9" stroke-width="1.6" marker-end="url(#arr)"/>
+        <text x="460" y="314" fill="#c9d1d9" text-anchor="middle">HANDSHAKE_DONE, NEW_TOKEN, …</text>
+      </g>
+
+      <!-- app data -->
+      <line x1="180" y1="360" x2="740" y2="360" stroke="#7ee787" stroke-width="2" stroke-dasharray="2 5"/>
+      <rect x="360" y="350" width="200" height="22" rx="5" fill="#0d1117" stroke="#1f6f37"/>
+      <text x="460" y="365" fill="#7ee787" font-size="11.5" text-anchor="middle">application data (1-RTT, cleartext)</text>
+      <text x="460" y="392" fill="#566" font-size="11" text-anchor="middle" font-style="italic">streams now flow exactly like vanilla QUIC</text>
+    </svg>
+    <div class="cap"><b>Figure 4.</b> The Handshake "finished" round trip is the crux: it ensures the server only
+      completes <em>after</em> its Initial reply was sent, so it never drops Initial keys before the client has the
+      server's parameters.</div>
+  </div>
+
+  <div class="callout warn"><b>The bug this avoids.</b> A naive one-round-trip design makes the server complete
+    (and drop its Initial keys) <em>while still processing the client's Initial</em> — before its reply goes out.
+    The client then waits forever. The extra Handshake flight mirrors TLS ordering and fixes it.</div>
+</section>
+
+<!-- ───────────────────────── AEAD ───────────────────────── -->
+<section id="aead">
+  <h2><span class="num">05</span> The null AEAD &amp; the 16-byte tag</h2>
+  <p class="lead">"Null" means no encryption and no authentication — payload is copied verbatim. But it can't be
+    <em>zero</em> overhead, because of how QUIC protects packet headers.</p>
+
+  <div class="grid2">
+    <div class="fig" style="margin:0">
+      <svg viewBox="0 0 420 220" role="img" aria-label="QUIC header protection sample">
+        <text x="210" y="22" fill="#9aa7b4" font-size="12" text-anchor="middle" font-family="ui-monospace,Consolas,monospace">protected payload on the wire</text>
+        <!-- bytes -->
+        <rect x="20" y="40" width="60" height="40" rx="4" fill="#21262d" stroke="#30363d"/>
+        <text x="50" y="64" fill="#9aa7b4" font-size="11" text-anchor="middle">PN</text>
+        <rect x="80" y="40" width="60" height="40" rx="4" fill="#21262d" stroke="#30363d"/>
+        <text x="110" y="58" fill="#9aa7b4" font-size="10" text-anchor="middle">+4 off</text>
+        <!-- sample -->
+        <rect x="140" y="40" width="240" height="40" rx="4" fill="#1c1322" stroke="#bc8cff"/>
+        <text x="260" y="64" fill="#d6b8ff" font-size="12" text-anchor="middle">16-byte HP sample</text>
+        <!-- brace -->
+        <path d="M140 88 Q140 96 150 96 L250 96 Q260 96 260 104 Q260 96 270 96 L370 96 Q380 96 380 88"
+              fill="none" stroke="#bc8cff" stroke-width="1.5"/>
+        <text x="260" y="120" fill="#a98cc4" font-size="11" text-anchor="middle">RFC 9001 §5.4.2</text>
+        <text x="210" y="160" fill="#9aa7b4" font-size="12.5" text-anchor="middle">receiver needs ≥ 4 + 16 bytes</text>
+        <text x="210" y="182" fill="#9aa7b4" font-size="12.5" text-anchor="middle">after the header, or it drops the packet</text>
+        <text x="210" y="206" fill="#ff7b72" font-size="12" text-anchor="middle" font-family="ui-monospace,Consolas,monospace">"packet too small"</text>
+      </svg>
+      <div class="cap">Header protection samples 16 bytes, 4 into the packet number.</div>
+    </div>
+
+    <div class="fig" style="margin:0">
+      <svg viewBox="0 0 420 220" role="img" aria-label="Null AEAD packet layout">
+        <text x="210" y="22" fill="#9aa7b4" font-size="12" text-anchor="middle" font-family="ui-monospace,Consolas,monospace">Seal(payload)</text>
+        <rect x="40" y="44" width="220" height="46" rx="6" fill="#11261b" stroke="#1f6f37"/>
+        <text x="150" y="72" fill="#7ee787" font-size="13" text-anchor="middle">payload (cleartext, verbatim)</text>
+        <rect x="262" y="44" width="118" height="46" rx="6" fill="#1c1322" stroke="#bc8cff"/>
+        <text x="321" y="66" fill="#d6b8ff" font-size="12" text-anchor="middle">16 × 0x00</text>
+        <text x="321" y="82" fill="#a98cc4" font-size="10.5" text-anchor="middle">dummy tag</text>
+
+        <text x="210" y="124" fill="#9aa7b4" font-size="12.5" text-anchor="middle">• not authentication — bytes are never checked</text>
+        <text x="210" y="146" fill="#9aa7b4" font-size="12.5" text-anchor="middle">• keeps packets size-compatible with vanilla QUIC</text>
+        <text x="210" y="168" fill="#9aa7b4" font-size="12.5" text-anchor="middle">• stripped on Open(), payload returned as-is</text>
+        <rect x="70" y="186" width="280" height="24" rx="6" fill="#11261b" stroke="#1f6f37"/>
+        <text x="210" y="202" fill="#bff3cb" font-size="12" text-anchor="middle">Overhead() == 16</text>
+      </svg>
+      <div class="cap">The null AEAD appends 16 zero bytes so small packets survive.</div>
+    </div>
+  </div>
+
+  <div class="callout good"><b>Why it matters in practice.</b> Real AEADs satisfy the size requirement for free via
+    their authentication tag. A truly zero-overhead AEAD made tiny NQUIC packets — ACKs and the "finished" — fall
+    below the minimum, so the peer dropped them and the handshake stalled. The dummy tag is the fix.</div>
+</section>
+
+<!-- ───────────────────────── WIRE FIXES ───────────────────────── -->
+<section id="wire">
+  <h2><span class="num">06</span> Three integration points</h2>
+  <p class="lead">Beyond the <code>CryptoSetup</code> itself, three small touch-points in the connection layer make
+    the handshake complete over a real socket.</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 920 200" role="img" aria-label="Three integration points">
+      <!-- 1 -->
+      <rect x="20" y="30" width="280" height="140" rx="12" fill="#161b22" stroke="#30363d"/>
+      <circle cx="48" cy="58" r="14" fill="#0e2233" stroke="#58a6ff"/><text x="48" y="63" fill="#58a6ff" font-size="14" text-anchor="middle" font-weight="700">1</text>
+      <text x="72" y="63" fill="#e6edf3" font-size="14" font-weight="600">No ClientHello scramble</text>
+      <text x="40" y="92" fill="#9aa7b4" font-size="12">crypto_stream.go</text>
+      <text x="40" y="114" fill="#9aa7b4" font-size="12">The client otherwise runs</text>
+      <text x="40" y="132" fill="#9aa7b4" font-size="12">findSNIAndECH over Initial</text>
+      <text x="40" y="150" fill="#9aa7b4" font-size="12">bytes — which are params,</text>
+      <text x="40" y="168" fill="#9aa7b4" font-size="12">not a ClientHello.</text>
+
+      <!-- 2 -->
+      <rect x="320" y="30" width="280" height="140" rx="12" fill="#161b22" stroke="#30363d"/>
+      <circle cx="348" cy="58" r="14" fill="#1c1322" stroke="#bc8cff"/><text x="348" y="63" fill="#d6b8ff" font-size="14" text-anchor="middle" font-weight="700">2</text>
+      <text x="372" y="63" fill="#e6edf3" font-size="14" font-weight="600">Handshake "finished"</text>
+      <text x="340" y="92" fill="#9aa7b4" font-size="12">nquic_crypto_setup.go</text>
+      <text x="340" y="114" fill="#9aa7b4" font-size="12">A Handshake-level round</text>
+      <text x="340" y="132" fill="#9aa7b4" font-size="12">trip so the server completes</text>
+      <text x="340" y="150" fill="#9aa7b4" font-size="12">only after its Initial reply</text>
+      <text x="340" y="168" fill="#9aa7b4" font-size="12">has been sent.</text>
+
+      <!-- 3 -->
+      <rect x="620" y="30" width="280" height="140" rx="12" fill="#161b22" stroke="#30363d"/>
+      <circle cx="648" cy="58" r="14" fill="#11261b" stroke="#1f6f37"/><text x="648" y="63" fill="#7ee787" font-size="14" text-anchor="middle" font-weight="700">3</text>
+      <text x="672" y="63" fill="#e6edf3" font-size="14" font-weight="600">Initial-space nil guard</text>
+      <text x="640" y="92" fill="#9aa7b4" font-size="12">received_packet_handler.go</text>
+      <text x="640" y="114" fill="#9aa7b4" font-size="12">NQUIC can confirm the</text>
+      <text x="640" y="132" fill="#9aa7b4" font-size="12">handshake (dropping the</text>
+      <text x="640" y="150" fill="#9aa7b4" font-size="12">Initial space) while still</text>
+      <text x="640" y="168" fill="#9aa7b4" font-size="12">processing an Initial packet.</text>
+    </svg>
+    <div class="cap"><b>Figure 6.</b> Small, localized changes — each one a direct consequence of "no ClientHello, no Handshake secret."</div>
+  </div>
+</section>
+
+<!-- ───────────────────────── NATS DEMO ───────────────────────── -->
+<section id="nats">
+  <h2><span class="num">07</span> NATS pub/sub over NQUIC</h2>
+  <p class="lead">The example in <code>example/nats-nquic/</code> runs a miniature NATS broker and two clients —
+    all over NQUIC, no TLS, no certificates — speaking a real subset of the NATS client protocol.</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 920 320" role="img" aria-label="NATS over NQUIC pub/sub flow">
+      <!-- nodes -->
+      <rect x="40" y="120" width="170" height="80" rx="12" fill="#11261b" stroke="#1f6f37"/>
+      <text x="125" y="150" fill="#7ee787" font-size="15" text-anchor="middle" font-weight="700">Subscriber</text>
+      <text x="125" y="172" fill="#9fd9af" font-size="11.5" text-anchor="middle">SUB nats.demo</text>
+      <text x="125" y="189" fill="#6f9a7c" font-size="10.5" text-anchor="middle">NQUIC client</text>
+
+      <rect x="375" y="110" width="170" height="100" rx="12" fill="#0e2233" stroke="#58a6ff"/>
+      <text x="460" y="140" fill="#58a6ff" font-size="15" text-anchor="middle" font-weight="700">Broker</text>
+      <text x="460" y="162" fill="#9cc4ee" font-size="11.5" text-anchor="middle">routes by subject</text>
+      <text x="460" y="180" fill="#9cc4ee" font-size="11.5" text-anchor="middle">INFO / SUB / PUB / MSG</text>
+      <text x="460" y="198" fill="#6e93b8" font-size="10.5" text-anchor="middle">NQUIC server</text>
+
+      <rect x="710" y="120" width="170" height="80" rx="12" fill="#1c1322" stroke="#bc8cff"/>
+      <text x="795" y="150" fill="#d6b8ff" font-size="15" text-anchor="middle" font-weight="700">Publisher</text>
+      <text x="795" y="172" fill="#c4a5e0" font-size="11.5" text-anchor="middle">PUB nats.demo</text>
+      <text x="795" y="189" fill="#9b80b8" font-size="10.5" text-anchor="middle">NQUIC client</text>
+
+      <defs>
+        <marker id="g2" markerWidth="11" markerHeight="11" refX="8" refY="3.5" orient="auto"><path d="M0,0 L9,3.5 L0,7 Z" fill="#7ee787"/></marker>
+        <marker id="v2" markerWidth="11" markerHeight="11" refX="8" refY="3.5" orient="auto"><path d="M0,0 L9,3.5 L0,7 Z" fill="#bc8cff"/></marker>
+        <marker id="b2" markerWidth="11" markerHeight="11" refX="8" refY="3.5" orient="auto"><path d="M0,0 L9,3.5 L0,7 Z" fill="#58a6ff"/></marker>
+      </defs>
+
+      <!-- publisher -> broker -->
+      <line x1="710" y1="150" x2="548" y2="150" stroke="#bc8cff" stroke-width="2" marker-end="url(#v2)"/>
+      <text x="628" y="142" fill="#c4a5e0" font-size="11.5" text-anchor="middle" font-family="ui-monospace,Consolas,monospace">① PUB</text>
+
+      <!-- broker -> subscriber -->
+      <line x1="375" y1="165" x2="213" y2="165" stroke="#58a6ff" stroke-width="2" marker-end="url(#b2)"/>
+      <text x="294" y="158" fill="#9cc4ee" font-size="11.5" text-anchor="middle" font-family="ui-monospace,Consolas,monospace">② MSG</text>
+
+      <!-- subscriber registration (dashed) -->
+      <line x1="213" y1="185" x2="373" y2="185" stroke="#7ee787" stroke-width="1.6" stroke-dasharray="4 4" marker-end="url(#g2)"/>
+      <text x="294" y="205" fill="#7fbf95" font-size="11" text-anchor="middle" font-family="ui-monospace,Consolas,monospace">SUB (earlier)</text>
+
+      <!-- handshake note -->
+      <rect x="300" y="250" width="320" height="46" rx="10" fill="#0d1117" stroke="#30363d"/>
+      <text x="460" y="270" fill="#9aa7b4" font-size="12" text-anchor="middle">every link is an NQUIC connection</text>
+      <text x="460" y="287" fill="#7ee787" font-size="12" text-anchor="middle" font-weight="600">no TLS · no certificates</text>
+
+      <!-- server-speaks-first note -->
+      <text x="125" y="250" fill="#566" font-size="10.5" text-anchor="middle" font-style="italic">broker opens stream,</text>
+      <text x="125" y="265" fill="#566" font-size="10.5" text-anchor="middle" font-style="italic">sends INFO first</text>
+    </svg>
+    <div class="cap"><b>Figure 7.</b> Publisher → broker → subscriber, the classic NATS path, carried entirely over NQUIC.</div>
+  </div>
+
+  <pre><span class="c"># go run ./example/nats-nquic/</span>
+broker listening on 127.0.0.1:XXXXX <span class="c">(NQUIC: no TLS, no certs)</span>
+INFO {<span class="s">"server_name"</span>:<span class="s">"nquic-demo"</span>,<span class="s">"proto"</span>:1}
+subscriber: SUB nats.demo
+INFO {<span class="s">"server_name"</span>:<span class="s">"nquic-demo"</span>,<span class="s">"proto"</span>:1}
+publisher: PUB nats.demo <span class="s">"hello over NQUIC 🚀"</span>
+<span class="t">✅ subscriber received on "nats.demo": hello over NQUIC 🚀</span></pre>
+
+  <div class="callout info"><b>Server speaks first.</b> In NATS the server greets with <code>INFO</code>, but a
+    server-<em>accepted</em> QUIC stream only materializes once the client writes. So the broker <em>opens</em> the
+    stream and the client <em>accepts</em> it — the one place NATS semantics are mapped onto QUIC stream mechanics.</div>
+</section>
+
+<!-- ───────────────────────── API ───────────────────────── -->
+<section id="api">
+  <h2><span class="num">08</span> Using it</h2>
+  <p class="lead">The only NQUIC-specific code is handing <code>quic.NQUICConfig()</code> to <code>Listen</code> and
+    <code>Dial</code>. Everything else is ordinary quic-go.</p>
+  <pre><span class="k">import</span> <span class="s">"github.com/quic-go/quic-go"</span>
+
+<span class="c">// Server — no certificate, no TLS handshake.</span>
+ln, _   := tr.<span class="f">Listen</span>(quic.<span class="f">NQUICConfig</span>(), <span class="k">nil</span>)
+
+<span class="c">// Client — dial the same TLS-free profile.</span>
+conn, _ := tr.<span class="f">Dial</span>(ctx, addr, quic.<span class="f">NQUICConfig</span>(), <span class="k">nil</span>)
+
+<span class="c">// From here on, identical to any quic-go program.</span>
+str, _  := conn.<span class="f">OpenStreamSync</span>(ctx)
+str.<span class="f">Write</span>([]<span class="k">byte</span>(<span class="s">"hello"</span>))</pre>
+  <p class="muted">Under the hood, <code>NQUICConfig()</code> returns a certificate-less <code>tls.Config</code> whose
+    <code>NextProtos</code> contains the sentinel ALPN <code>"nquic-null/v1"</code>. When the connection
+    constructors see it, they route to <code>nquicSetup</code> instead of the TLS crypto setup — the
+    <code>tls.Config</code> is only a carrier for the toggle.</p>
+</section>
+
+<!-- ───────────────────────── LIMITS ───────────────────────── -->
+<section id="limits">
+  <h2><span class="num">09</span> Security model &amp; limitations</h2>
+  <div class="callout warn"><b>Cleartext.</b> The null profile provides <b>no confidentiality</b> and <b>no
+    authentication</b> at the transport layer. Use it only on fully trusted networks (e.g. a NATS supercluster
+    inside a VPC or service mesh) where NATS itself handles authentication via nkeys / JWT / tokens.</div>
+  <ul>
+    <li><b>Next step — encrypted, still cert-free.</b> An <span class="pill nquic">ephemeral-ECDH</span> profile
+      (X25519 in the Initial exchange → HKDF → a real AEAD) would keep confidentiality and forward secrecy while
+      still dropping certificates. It slots into the same <code>CryptoSetup</code> seam.</li>
+    <li><b>Opt-in ergonomics.</b> A first-class <code>Config</code> option (e.g. <code>EnableNQUIC</code>) would be
+      cleaner than the ALPN sentinel; the sentinel was chosen to keep the prototype's blast radius small.</li>
+    <li><b>Not implemented in the null profile:</b> 0-RTT, session resumption, key update.</li>
+  </ul>
+
+  <h3>Verification</h3>
+  <table>
+    <thead><tr><th>Test</th><th>What it proves</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td><code>internal/handshake · TestNQUICHandshake</code></td><td>full Initial→Handshake→1-RTT progression + null-AEAD data round trip, no TLS</td><td class="same">passes</td></tr>
+      <tr><td><code>. · TestNQUICEndToEnd</code></td><td>real connection over loopback UDP, no certs, stream echo</td><td class="same">passes</td></tr>
+      <tr><td><code>example/nats-nquic</code></td><td>NATS pub/sub end to end over NQUIC</td><td class="same">runs</td></tr>
+    </tbody>
+  </table>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    NQUIC — experimental TLS-free QUIC profile for NATS · built on
+    <a href="https://github.com/quic-go/quic-go">quic-go</a>.
+    Source: <code>NQUIC.md</code>, <code>nquic.go</code>, <code>internal/handshake/nquic_*.go</code>,
+    <code>example/nats-nquic/</code>.
+    <div style="margin-top:8px" class="muted">This document is a design overview; the prototype provides no transport-layer security in the null profile.</div>
+  </div>
+</footer>
+
+</body>
+</html>
