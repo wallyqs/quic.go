@@ -1786,23 +1786,36 @@ func TestSentPacketHandlerPerPathPacketNumberSpaces(t *testing.T) {
 	)
 	h := sph.(*sentPacketHandler)
 
-	// the initial path always exists and aliases the AppData packet number space
+	// the initial path always exists and shares the AppData packet number space,
+	// congestion controller and RTT estimator with the handler
 	require.NotNil(t, h.appDataPath(InitialPathID))
-	require.Same(t, h.appDataPackets, h.appDataPath(InitialPathID))
+	require.Same(t, h.appDataPackets, h.appDataPath(InitialPathID).space)
+	require.Same(t, h.congestion, h.appDataPath(InitialPathID).congestion)
+	require.Same(t, h.rttStats, h.appDataPath(InitialPathID).rttStats)
 	// other paths don't exist yet
 	require.Nil(t, h.appDataPath(1))
 
-	// add a second path: it gets its own, independent packet number space
+	// add a second path: it gets its own, independent packet number space,
+	// congestion controller and RTT estimator
 	h.addPath(1)
 	require.NotNil(t, h.appDataPath(1))
-	require.NotSame(t, h.appDataPath(InitialPathID), h.appDataPath(1))
+	require.NotSame(t, h.appDataPath(InitialPathID).space, h.appDataPath(1).space)
+	require.NotSame(t, h.congestion, h.appDataPath(1).congestion)
+	require.NotSame(t, h.rttStats, h.appDataPath(1).rttStats)
 
 	// advancing one path's packet numbers doesn't affect the other
-	before := h.appDataPath(InitialPathID).pns.Peek()
+	before := h.appDataPath(InitialPathID).space.pns.Peek()
 	for range 5 {
-		h.appDataPath(1).pns.Pop()
+		h.appDataPath(1).space.pns.Pop()
 	}
-	require.Equal(t, before, h.appDataPath(InitialPathID).pns.Peek())
+	require.Equal(t, before, h.appDataPath(InitialPathID).space.pns.Peek())
+
+	// per-path RTT estimation is independent: updating one path's RTT
+	// doesn't affect another path's estimate
+	path0RTT := h.appDataPath(InitialPathID).rttStats.SmoothedRTT()
+	h.appDataPath(1).rttStats.UpdateRTT(path0RTT+150*time.Millisecond, 0)
+	require.Equal(t, path0RTT+150*time.Millisecond, h.appDataPath(1).rttStats.SmoothedRTT())
+	require.Equal(t, path0RTT, h.appDataPath(InitialPathID).rttStats.SmoothedRTT())
 
 	// adding the same path again is a no-op (keeps the existing space)
 	existing := h.appDataPath(1)

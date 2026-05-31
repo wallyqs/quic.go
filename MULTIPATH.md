@@ -62,8 +62,18 @@ packet number spaces all assume a single active path.
     loss detection (currently loss/PTO still read path 0). This merges into
     Phase 4, since `packetNumberSpace` carries `lossTime`/`lastAckElicitingPacketTime`.
 
-- **Phase 4 — per-path congestion control + RTT.** The hard part: one
-  `congestion.SendAlgorithm` + `RTTStats` per path in `sent_packet_handler.go`.
+- **Phase 4 — per-path congestion control + RTT (IN PROGRESS).**
+  - `pathState` (`internal/ackhandler/path.go`) now bundles each path's packet
+    number space, congestion controller, RTT estimator and bytes-in-flight.
+  - The initial path reuses the handler's shared congestion controller and RTT
+    estimator (so single-path behavior is byte-for-byte unchanged); additional
+    paths get fresh, independent ones via `newPathState`.
+  - `TestSentPacketHandlerPerPathPacketNumberSpaces` verifies that packet
+    numbering and RTT estimation are independent across paths.
+  - REMAINING: have `SentPacket` / `ReceivedAck` / `SendMode` consult the
+    per-path congestion controller and RTT for non-zero paths. Today they still
+    use the shared (path-0) controller, because nothing sends on additional
+    paths until the scheduler exists (Phase 5). This is the integration point.
 
 - **Phase 5 — packet scheduler + send loop.** Choose a path per packet in
   `connection.go`'s send loop; add a throughput-oriented scheduler (fill the

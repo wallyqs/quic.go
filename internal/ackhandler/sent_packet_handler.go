@@ -68,12 +68,15 @@ type sentPacketHandler struct {
 	initialPackets   *packetNumberSpace
 	handshakePackets *packetNumberSpace
 	appDataPackets   *packetNumberSpace
-	// appDataPaths holds the application-data packet number space for each path.
-	// The initial path (InitialPathID) is always present and aliases appDataPackets.
-	// Additional entries are created when the multipath extension is in use; each
-	// path has its own packet number space (RFC draft-ietf-quic-multipath).
-	appDataPaths map[PathID]*packetNumberSpace
-	lostPackets  lostPacketTracker // only for application-data packet number space
+	// appDataPaths holds the per-path application-data state for each path.
+	// The initial path (InitialPathID) is always present; its packet number space,
+	// congestion controller and RTT estimator are shared with the fields below, so
+	// single-path behavior is unchanged. Additional entries are created when the
+	// multipath extension is in use; each path performs loss recovery and
+	// congestion control independently (draft-ietf-quic-multipath).
+	appDataPaths           map[PathID]*pathState
+	initialMaxDatagramSize protocol.ByteCount
+	lostPackets            lostPacketTracker // only for application-data packet number space
 	// send time of the largest acknowledged packet, across all packet number spaces
 	largestAckedTime monotime.Time
 
@@ -157,8 +160,11 @@ func NewSentPacketHandler(
 		perspective:                    pers,
 		qlogger:                        qlogger,
 		logger:                         logger,
+		initialMaxDatagramSize:         initialMaxDatagramSize,
 	}
-	h.appDataPaths = map[PathID]*packetNumberSpace{InitialPathID: h.appDataPackets}
+	h.appDataPaths = map[PathID]*pathState{
+		InitialPathID: newInitialPathState(h.appDataPackets, h.congestion, h.rttStats),
+	}
 	if enableECN {
 		h.enableECN = true
 		h.ecnTracker = newECNTracker(logger, qlogger)
@@ -166,24 +172,24 @@ func NewSentPacketHandler(
 	return h
 }
 
-// addPath creates the application-data packet number space for a new path.
-// The initial path (InitialPathID) is created automatically; this is used for
-// additional paths once the multipath extension has been negotiated.
-// It is a no-op if the path already exists.
+// addPath creates independent per-path state (packet number space, congestion
+// controller and RTT estimator) for a new path. The initial path (InitialPathID)
+// is created automatically; this is used for additional paths once the multipath
+// extension has been negotiated. It is a no-op if the path already exists.
 func (h *sentPacketHandler) addPath(id PathID) {
 	if _, ok := h.appDataPaths[id]; ok {
 		return
 	}
-	h.appDataPaths[id] = newPacketNumberSpace(0, true)
+	h.appDataPaths[id] = newPathState(h.connStats, h.initialMaxDatagramSize, h.qlogger)
 }
 
-// appDataPath returns the application-data packet number space for the given path,
-// or nil if the path does not exist.
-func (h *sentPacketHandler) appDataPath(id PathID) *packetNumberSpace {
+// appDataPath returns the per-path state for the given path, or nil if the path
+// does not exist.
+func (h *sentPacketHandler) appDataPath(id PathID) *pathState {
 	return h.appDataPaths[id]
 }
 
-// removePath drops the packet number space for an abandoned path.
+// removePath drops the state for an abandoned path.
 // The initial path cannot be removed.
 func (h *sentPacketHandler) removePath(id PathID) {
 	if id == InitialPathID {
@@ -1136,7 +1142,7 @@ func (h *sentPacketHandler) ResetForRetry(now monotime.Time) {
 	}
 	h.initialPackets = newPacketNumberSpace(h.initialPackets.pns.Peek(), false)
 	h.appDataPackets = newPacketNumberSpace(h.appDataPackets.pns.Peek(), true)
-	h.appDataPaths[InitialPathID] = h.appDataPackets
+	h.appDataPaths[InitialPathID].space = h.appDataPackets
 	oldAlarm := h.alarm
 	h.alarm = alarmTimer{}
 	if h.qlogger != nil {
