@@ -36,16 +36,22 @@ func newMultipathManager(maxPathID uint64) *multipathManager {
 	}
 }
 
-// addPath registers a new additional path with the given connection ID and
-// transport. It returns the assigned path ID and false if the negotiated path
-// limit has been reached.
-func (m *multipathManager) addPath(connID protocol.ConnectionID, tr *Transport) (ackhandler.PathID, bool) {
+// addPath registers a new additional path on the given transport. The path's
+// destination connection ID is obtained from getConnID, called with the newly
+// assigned path ID while holding the lock (so the ID/connection-ID assignment
+// is atomic). It returns the assigned path ID, or false if the negotiated path
+// limit has been reached or no connection ID is available.
+func (m *multipathManager) addPath(tr *Transport, getConnID func(ackhandler.PathID) (protocol.ConnectionID, bool)) (ackhandler.PathID, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if uint64(m.nextID) > m.maxPathID {
 		return 0, false
 	}
 	id := m.nextID
+	connID, ok := getConnID(id)
+	if !ok {
+		return 0, false
+	}
 	m.nextID++
 	m.paths[id] = &multipathPath{
 		id:        id,

@@ -90,21 +90,31 @@ packet number spaces all assume a single active path.
     The initial path delegates to the existing single-path methods, so its
     behavior is unchanged. White-box tested (send → ACK → bytes-in-flight drains,
     independent per-path RTT).
-  - REMAINING (the big, unvalidatable-in-CI integration):
-    1. `packetPacker`: a path-aware 1-RTT data-packing method (pack with a
-       given path's connection ID + packet number, assigning stream/control
-       frames to the path). Today only `PackPathProbePacket(connID, frames)`
-       packs for a specific connection ID, and it uses the default path's PN.
-    2. `connection.go` send loop: iterate `selectSendablePaths`, pack a packet
-       per path via the packer, write it to that path's transport socket, and
-       call `SentPacketForPath`.
-    3. Receive side: demux incoming packets to their path and call
-       `ReceivedAckForPath` (in our quic-go-only design, the path is identified
-       by the local connection ID the packet arrived on).
-    4. Public API (phase 6) to open + activate additional paths simultaneously
-       (today `Path.Switch()` is an exclusive hand-off).
-    This needs real multi-path network validation (AWS), so it is being wired
-    slice by slice rather than as one blind rewrite of the send path.
+  - Path-aware 1-RTT packing landed: `packetPacker.PackPacketForPath` packs a
+    1-RTT packet with a given path's connection ID + packet number space.
+  - Connection-side registry landed: `multipathManager` (`multipath_manager.go`)
+    tracks additional paths (connection ID, transport, status, validation) and
+    builds the scheduler input. `addPath` fetches the path's connection ID
+    atomically via a callback.
+  - Send-loop fan-out landed: `Conn.sendMultipathPackets` packs + records + writes
+    a packet per scheduler-selected path; hooked into `triggerSending`'s SendAny
+    case. `Conn.multipath` is initialized in `applyTransportParameters` when
+    multipath is negotiated. No-op (and zero behavior change) when multipath is off.
+
+- **Phase 6 — public API + validation (REMAINING).** These are the final,
+  interlocking pieces; they need real multi-path network validation (e.g. AWS):
+  1. **Thread-safe path-add API.** A public `Conn` method to add a path must
+     post the work to the run-loop goroutine, since `connIDManager` and
+     `sentPacketHandler` are owned by it (calling them from a user goroutine
+     would race). The plumbing (transport init, connection-ID routing
+     registration, `multipath.addPath`, `sentPacketHandler.AddPath`) is ready.
+  2. **Path validation.** Send PATH_CHALLENGE on the new path and only mark it
+     validated (so the scheduler sends on it) once the PATH_RESPONSE arrives.
+  3. **Receive-side ACK demux.** Route incoming 1-RTT ACKs to
+     `ReceivedAckForPath(id)` based on the local connection ID the packet
+     arrived on. Without this, ACKs for multipath packets are misattributed to
+     the initial path's congestion controller. This is required for the data
+     path to be correct, not just functional.
 
 - **Phase 6 — public API + validation.** Expose adding/activating paths; test
   aggregate throughput across two paths.

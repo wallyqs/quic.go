@@ -13,22 +13,26 @@ func TestMultipathManagerAddRespectsLimit(t *testing.T) {
 	// maxPathID = 2 allows path IDs 1 and 2 (path 0 is the initial path)
 	m := newMultipathManager(2)
 	connID := protocol.ParseConnectionID([]byte{1, 2, 3, 4})
+	getConnID := func(ackhandler.PathID) (protocol.ConnectionID, bool) { return connID, true }
 
-	id1, ok := m.addPath(connID, nil)
+	id1, ok := m.addPath(nil, getConnID)
 	require.True(t, ok)
 	require.Equal(t, ackhandler.PathID(1), id1)
-	id2, ok := m.addPath(connID, nil)
+	id2, ok := m.addPath(nil, getConnID)
 	require.True(t, ok)
 	require.Equal(t, ackhandler.PathID(2), id2)
 	// the third path exceeds the negotiated limit
-	_, ok = m.addPath(connID, nil)
+	_, ok = m.addPath(nil, getConnID)
 	require.False(t, ok)
 	require.Equal(t, 2, m.len())
 }
 
 func TestMultipathManagerStatusAndValidation(t *testing.T) {
 	m := newMultipathManager(4)
-	id, ok := m.addPath(protocol.ParseConnectionID([]byte{1, 2, 3, 4}), nil)
+	getConnID := func(ackhandler.PathID) (protocol.ConnectionID, bool) {
+		return protocol.ParseConnectionID([]byte{1, 2, 3, 4}), true
+	}
+	id, ok := m.addPath(nil, getConnID)
 	require.True(t, ok)
 
 	p, ok := m.path(id)
@@ -51,8 +55,9 @@ func TestMultipathManagerStatusAndValidation(t *testing.T) {
 func TestMultipathManagerSchedulablePaths(t *testing.T) {
 	m := newMultipathManager(4)
 	connID := protocol.ParseConnectionID([]byte{1, 2, 3, 4})
-	id1, _ := m.addPath(connID, nil)
-	id2, _ := m.addPath(connID, nil)
+	getConnID := func(ackhandler.PathID) (protocol.ConnectionID, bool) { return connID, true }
+	id1, _ := m.addPath(nil, getConnID)
+	id2, _ := m.addPath(nil, getConnID)
 	m.setValidated(id1)
 	m.setValidated(id2)
 
