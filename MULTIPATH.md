@@ -75,9 +75,20 @@ packet number spaces all assume a single active path.
     use the shared (path-0) controller, because nothing sends on additional
     paths until the scheduler exists (Phase 5). This is the integration point.
 
-- **Phase 5 — packet scheduler + send loop.** Choose a path per packet in
-  `connection.go`'s send loop; add a throughput-oriented scheduler (fill the
-  fastest available path first).
+- **Phase 5 — packet scheduler + send loop (IN PROGRESS).**
+  - `selectSendablePaths` (`path_scheduler.go`) is the throughput scheduling
+    policy: stripe across every validated, congestion-window-open "available"
+    path; fall back to "backup" paths only when no available path can send.
+    Pure and fully unit-tested (`path_scheduler_test.go`).
+  - REMAINING (the big integration): thread `PathID` through the
+    `SentPacketHandler` interface (`SentPacket`, `ReceivedAck`, `SendMode`,
+    `Peek`/`PopPacketNumber`, loss-detection timers) and the send loop in
+    `connection.go`, so the loop iterates over `selectSendablePaths`, packs a
+    packet per path with that path's connection ID, and routes received ACKs to
+    the per-path congestion controller. Also: receive-side demux of incoming
+    packets to their path. This step changes the mock and many call sites, and
+    needs real multi-path network validation (cannot be exercised in CI / this
+    sandbox).
 
 - **Phase 6 — public API + validation.** Expose adding/activating paths; test
   aggregate throughput across two paths.
