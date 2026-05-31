@@ -318,6 +318,46 @@ func (c *MockPackerPackPTOProbePacketCall) DoAndReturn(f func(protocol.Encryptio
 	return c
 }
 
+// PackPacketForPath mocks base method.
+func (m *MockPacker) PackPacketForPath(pathID ackhandler.PathID, connID protocol.ConnectionID, maxPacketSize protocol.ByteCount, now monotime.Time, v protocol.Version) (shortHeaderPacket, *packetBuffer, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PackPacketForPath", pathID, connID, maxPacketSize, now, v)
+	ret0, _ := ret[0].(shortHeaderPacket)
+	ret1, _ := ret[1].(*packetBuffer)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// PackPacketForPath indicates an expected call of PackPacketForPath.
+func (mr *MockPackerMockRecorder) PackPacketForPath(pathID, connID, maxPacketSize, now, v any) *MockPackerPackPacketForPathCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PackPacketForPath", reflect.TypeOf((*MockPacker)(nil).PackPacketForPath), pathID, connID, maxPacketSize, now, v)
+	return &MockPackerPackPacketForPathCall{Call: call}
+}
+
+// MockPackerPackPacketForPathCall wrap *gomock.Call
+type MockPackerPackPacketForPathCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPackerPackPacketForPathCall) Return(arg0 shortHeaderPacket, arg1 *packetBuffer, arg2 error) *MockPackerPackPacketForPathCall {
+	c.Call = c.Call.Return(arg0, arg1, arg2)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPackerPackPacketForPathCall) Do(f func(ackhandler.PathID, protocol.ConnectionID, protocol.ByteCount, monotime.Time, protocol.Version) (shortHeaderPacket, *packetBuffer, error)) *MockPackerPackPacketForPathCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPackerPackPacketForPathCall) DoAndReturn(f func(ackhandler.PathID, protocol.ConnectionID, protocol.ByteCount, monotime.Time, protocol.Version) (shortHeaderPacket, *packetBuffer, error)) *MockPackerPackPacketForPathCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // PackPathProbePacket mocks base method.
 func (m *MockPacker) PackPathProbePacket(arg0 protocol.ConnectionID, arg1 []ackhandler.Frame, arg2 protocol.Version) (shortHeaderPacket, *packetBuffer, error) {
 	m.ctrl.T.Helper()

@@ -25,6 +25,7 @@ type packer interface {
 	PackConnectionClose(*qerr.TransportError, protocol.ByteCount, protocol.Version) (*coalescedPacket, error)
 	PackApplicationClose(*qerr.ApplicationError, protocol.ByteCount, protocol.Version) (*coalescedPacket, error)
 	PackPathProbePacket(protocol.ConnectionID, []ackhandler.Frame, protocol.Version) (shortHeaderPacket, *packetBuffer, error)
+	PackPacketForPath(pathID ackhandler.PathID, connID protocol.ConnectionID, maxPacketSize protocol.ByteCount, now monotime.Time, v protocol.Version) (shortHeaderPacket, *packetBuffer, error)
 	PackMTUProbePacket(ping ackhandler.Frame, size protocol.ByteCount, v protocol.Version) (shortHeaderPacket, *packetBuffer, error)
 
 	SetToken([]byte)
@@ -97,6 +98,8 @@ func (p *longHeaderPacket) IsAckEliciting() bool { return ackhandler.HasAckElici
 type packetNumberManager interface {
 	PeekPacketNumber(protocol.EncryptionLevel) (protocol.PacketNumber, protocol.PacketNumberLen)
 	PopPacketNumber(protocol.EncryptionLevel) protocol.PacketNumber
+	PeekPacketNumberForPath(ackhandler.PathID) (protocol.PacketNumber, protocol.PacketNumberLen)
+	PopPacketNumberForPath(ackhandler.PathID) protocol.PacketNumber
 }
 
 type sealingManager interface {
@@ -272,7 +275,7 @@ func (p *packetPacker) packConnectionClose(
 			continue
 		}
 		if encLevel == protocol.Encryption1RTT {
-			shp, err := p.appendShortHeaderPacket(buffer, connID, oneRTTPacketNumber, oneRTTPacketNumberLen, keyPhase, payloads[i], 0, maxPacketSize, sealers[i], false, v)
+			shp, err := p.appendShortHeaderPacket(buffer, connID, oneRTTPacketNumber, oneRTTPacketNumberLen, keyPhase, payloads[i], 0, maxPacketSize, sealers[i], false, ackhandler.InitialPathID, v)
 			if err != nil {
 				return nil, err
 			}
@@ -447,7 +450,7 @@ func (p *packetPacker) PackCoalescedPacket(onlyAck bool, maxSize protocol.ByteCo
 		}
 		packet.longHdrPackets = append(packet.longHdrPackets, longHdrPacket)
 	} else if oneRTTPayload.length > 0 {
-		shp, err := p.appendShortHeaderPacket(buffer, connID, oneRTTPacketNumber, oneRTTPacketNumberLen, kp, oneRTTPayload, 0, maxSize, oneRTTSealer, false, v)
+		shp, err := p.appendShortHeaderPacket(buffer, connID, oneRTTPacketNumber, oneRTTPacketNumberLen, kp, oneRTTPayload, 0, maxSize, oneRTTSealer, false, ackhandler.InitialPathID, v)
 		if err != nil {
 			return nil, err
 		}
@@ -470,6 +473,31 @@ func (p *packetPacker) AppendPacket(buf *packetBuffer, maxSize protocol.ByteCoun
 	return p.appendPacket(buf, false, maxSize, now, v)
 }
 
+// PackPacketForPath packs a 1-RTT packet for a specific multipath path, using
+// that path's destination connection ID and packet number space. The frames
+// come from the connection's shared framer, so application data is striped
+// across whichever paths the scheduler chooses to send on.
+// It returns errNothingToPack if there's nothing to send.
+func (p *packetPacker) PackPacketForPath(pathID ackhandler.PathID, connID protocol.ConnectionID, maxPacketSize protocol.ByteCount, now monotime.Time, v protocol.Version) (shortHeaderPacket, *packetBuffer, error) {
+	sealer, err := p.cryptoSetup.Get1RTTSealer()
+	if err != nil {
+		return shortHeaderPacket{}, nil, err
+	}
+	pn, pnLen := p.pnManager.PeekPacketNumberForPath(pathID)
+	hdrLen := wire.ShortHeaderLen(connID, pnLen)
+	pl := p.maybeGetShortHeaderPacket(sealer, hdrLen, maxPacketSize, false, now, v)
+	if pl.length == 0 {
+		return shortHeaderPacket{}, nil, errNothingToPack
+	}
+	buf := getPacketBuffer()
+	packet, err := p.appendShortHeaderPacket(buf, connID, pn, pnLen, sealer.KeyPhase(), pl, 0, maxPacketSize, sealer, false, pathID, v)
+	if err != nil {
+		buf.Release()
+		return shortHeaderPacket{}, nil, err
+	}
+	return packet, buf, nil
+}
+
 func (p *packetPacker) appendPacket(
 	buf *packetBuffer,
 	onlyAck bool,
@@ -490,7 +518,7 @@ func (p *packetPacker) appendPacket(
 	}
 	kp := sealer.KeyPhase()
 
-	return p.appendShortHeaderPacket(buf, connID, pn, pnLen, kp, pl, 0, maxPacketSize, sealer, false, v)
+	return p.appendShortHeaderPacket(buf, connID, pn, pnLen, kp, pl, 0, maxPacketSize, sealer, false, ackhandler.InitialPathID, v)
 }
 
 func (p *packetPacker) maybeGetCryptoPacket(
@@ -785,7 +813,7 @@ func (p *packetPacker) packPTOProbePacket1RTT(maxPacketSize protocol.ByteCount, 
 	}
 	buffer := getPacketBuffer()
 	packet := &coalescedPacket{buffer: buffer}
-	shp, err := p.appendShortHeaderPacket(buffer, connID, pn, pnLen, kp, pl, 0, maxPacketSize, s, false, v)
+	shp, err := p.appendShortHeaderPacket(buffer, connID, pn, pnLen, kp, pl, 0, maxPacketSize, s, false, ackhandler.InitialPathID, v)
 	if err != nil {
 		return nil, err
 	}
@@ -807,7 +835,7 @@ func (p *packetPacker) PackMTUProbePacket(ping ackhandler.Frame, size protocol.B
 	pn, pnLen := p.pnManager.PeekPacketNumber(protocol.Encryption1RTT)
 	padding := size - p.shortHeaderPacketLength(connID, pnLen, pl) - protocol.ByteCount(s.Overhead())
 	kp := s.KeyPhase()
-	packet, err := p.appendShortHeaderPacket(buffer, connID, pn, pnLen, kp, pl, padding, size, s, true, v)
+	packet, err := p.appendShortHeaderPacket(buffer, connID, pn, pnLen, kp, pl, padding, size, s, true, ackhandler.InitialPathID, v)
 	return packet, buffer, err
 }
 
@@ -827,7 +855,7 @@ func (p *packetPacker) PackPathProbePacket(connID protocol.ConnectionID, frames 
 		length: l,
 	}
 	padding := protocol.MinInitialPacketSize - p.shortHeaderPacketLength(connID, pnLen, payload) - protocol.ByteCount(s.Overhead())
-	packet, err := p.appendShortHeaderPacket(buf, connID, pn, pnLen, s.KeyPhase(), payload, padding, protocol.MinInitialPacketSize, s, false, v)
+	packet, err := p.appendShortHeaderPacket(buf, connID, pn, pnLen, s.KeyPhase(), payload, padding, protocol.MinInitialPacketSize, s, false, ackhandler.InitialPathID, v)
 	if err != nil {
 		return shortHeaderPacket{}, nil, err
 	}
@@ -904,6 +932,7 @@ func (p *packetPacker) appendShortHeaderPacket(
 	padding, maxPacketSize protocol.ByteCount,
 	sealer sealer,
 	isMTUProbePacket bool,
+	pathID ackhandler.PathID,
 	v protocol.Version,
 ) (shortHeaderPacket, error) {
 	var paddingLen protocol.ByteCount
@@ -932,7 +961,15 @@ func (p *packetPacker) appendShortHeaderPacket(
 	raw = p.encryptPacket(raw, sealer, pn, payloadOffset, protocol.ByteCount(pnLen))
 	buffer.Data = buffer.Data[:len(buffer.Data)+len(raw)]
 
-	if newPN := p.pnManager.PopPacketNumber(protocol.Encryption1RTT); newPN != pn {
+	// For the initial path, pop from the 1-RTT space (unchanged behavior).
+	// Additional paths pop from their own packet number space.
+	var newPN protocol.PacketNumber
+	if pathID == ackhandler.InitialPathID {
+		newPN = p.pnManager.PopPacketNumber(protocol.Encryption1RTT)
+	} else {
+		newPN = p.pnManager.PopPacketNumberForPath(pathID)
+	}
+	if newPN != pn {
 		return shortHeaderPacket{}, fmt.Errorf("packetPacker BUG: Peeked and Popped packet numbers do not match: expected %d, got %d", pn, newPN)
 	}
 	return shortHeaderPacket{

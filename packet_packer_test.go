@@ -609,6 +609,29 @@ func TestPack1RTTPacketWithACK(t *testing.T) {
 	require.Equal(t, ack, p.Ack)
 }
 
+func TestPackPacketForPath(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	tp := newTestPacketPacker(t, mockCtrl, protocol.PerspectiveClient)
+	const pathID = ackhandler.PathID(1)
+	connID := protocol.ParseConnectionID([]byte{0xaa, 0xbb, 0xcc, 0xdd})
+	// the packer uses the path's packet number space, not the default one
+	tp.pnManager.EXPECT().PeekPacketNumberForPath(pathID).Return(protocol.PacketNumber(0x7), protocol.PacketNumberLen2)
+	tp.pnManager.EXPECT().PopPacketNumberForPath(pathID).Return(protocol.PacketNumber(0x7))
+	tp.sealingManager.EXPECT().Get1RTTSealer().Return(newMockShortHeaderSealer(mockCtrl), nil)
+	tp.ackFramer.EXPECT().GetAckFrame(protocol.Encryption1RTT, gomock.Any(), false)
+	f := &wire.StreamFrame{StreamID: 5, Data: []byte{0xde, 0xca, 0xfb, 0xad}}
+	tp.framer.EXPECT().HasData().Return(true)
+	expectAppendFrames(tp.framer, nil, []ackhandler.StreamFrame{{Frame: f}})
+
+	p, buf, err := tp.packer.PackPacketForPath(pathID, connID, protocol.MaxByteCount, monotime.Now(), protocol.Version1)
+	require.NoError(t, err)
+	require.Equal(t, protocol.PacketNumber(0x7), p.PacketNumber)
+	// the packet carries the path's destination connection ID
+	require.Equal(t, connID, p.DestConnID)
+	require.Len(t, p.StreamFrames, 1)
+	require.NotZero(t, buf.Len())
+}
+
 func TestPackPathChallengeAndPathResponse(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	tp := newTestPacketPacker(t, mockCtrl, protocol.PerspectiveServer)
