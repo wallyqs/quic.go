@@ -130,6 +130,31 @@ func TestMarshalAndUnmarshalTransportParameters(t *testing.T) {
 	require.Equal(t, minAckDelay, *p.MinAckDelay)
 }
 
+func TestMarshalAndUnmarshalInitialMaxPathID(t *testing.T) {
+	// When multipath is enabled, the parameter is present and round-trips.
+	maxPathID := uint64(4)
+	params := &TransportParameters{
+		InitialSourceConnectionID: protocol.ParseConnectionID([]byte{0xde, 0xca, 0xfb, 0xad}),
+		ActiveConnectionIDLimit:   protocol.DefaultActiveConnectionIDLimit,
+		InitialMaxPathID:          &maxPathID,
+	}
+	data := params.Marshal(protocol.PerspectiveClient)
+	p := &TransportParameters{}
+	require.NoError(t, p.Unmarshal(data, protocol.PerspectiveClient))
+	require.NotNil(t, p.InitialMaxPathID)
+	require.Equal(t, maxPathID, *p.InitialMaxPathID)
+
+	// When multipath is not enabled, the parameter is absent (nil signals
+	// "multipath not supported").
+	noMP := &TransportParameters{
+		InitialSourceConnectionID: protocol.ParseConnectionID([]byte{0xde, 0xca, 0xfb, 0xad}),
+		ActiveConnectionIDLimit:   protocol.DefaultActiveConnectionIDLimit,
+	}
+	p2 := &TransportParameters{}
+	require.NoError(t, p2.Unmarshal(noMP.Marshal(protocol.PerspectiveClient), protocol.PerspectiveClient))
+	require.Nil(t, p2.InitialMaxPathID)
+}
+
 func TestMarshalAdditionalTransportParameters(t *testing.T) {
 	origAdditionalTransportParametersClient := AdditionalTransportParametersClient
 	t.Cleanup(func() {

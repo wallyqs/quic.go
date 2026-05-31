@@ -38,6 +38,16 @@ const (
 
 	FrameTypeDatagramNoLength   FrameType = 0x30
 	FrameTypeDatagramWithLength FrameType = 0x31
+
+	// Multipath QUIC frames.
+	//
+	// NOTE: These codepoints are loosely based on draft-ietf-quic-multipath, but
+	// this implementation is NOT wire-compatible with the IETF extension. It is
+	// intended for use between two quic-go endpoints that both enable multipath.
+	// See the initial_max_path_id transport parameter.
+	FrameTypePathAbandon   FrameType = 0x15228c05
+	FrameTypePathBackup    FrameType = 0x15228c07
+	FrameTypePathAvailable FrameType = 0x15228c08
 )
 
 func (t FrameType) IsStreamFrameType() bool {
@@ -54,6 +64,11 @@ func (t FrameType) IsAckFrameType() bool {
 
 func (t FrameType) IsDatagramFrameType() bool {
 	return t == FrameTypeDatagramNoLength || t == FrameTypeDatagramWithLength
+}
+
+// IsMultipathFrameType returns true for the (non-interoperable) multipath frame types.
+func (t FrameType) IsMultipathFrameType() bool {
+	return t == FrameTypePathAbandon || t == FrameTypePathBackup || t == FrameTypePathAvailable
 }
 
 func (t FrameType) isAllowedAtEncLevel(encLevel protocol.EncryptionLevel) bool {

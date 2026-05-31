@@ -50,6 +50,11 @@ const (
 	resetStreamAtParameterID transportParameterID = 0x17f7586d2cb571
 	// https://datatracker.ietf.org/doc/draft-ietf-quic-ack-frequency/11/
 	minAckDelayParameterID transportParameterID = 0xff04de1b
+	// Multipath support (non-interoperable; quic-go to quic-go only).
+	// Codepoint borrowed from draft-ietf-quic-multipath's initial_max_path_id.
+	// Its presence enables multipath; the value is the maximum path ID the
+	// sender is willing to use.
+	initialMaxPathIDParameterID transportParameterID = 0x0f739bbc1b666d09
 )
 
 // PreferredAddress is the value encoding in the preferred_address transport parameter
@@ -90,6 +95,11 @@ type TransportParameters struct {
 	MaxDatagramFrameSize protocol.ByteCount // RFC 9221
 	EnableResetStreamAt  bool               // https://datatracker.ietf.org/doc/draft-ietf-quic-reliable-stream-reset/06/
 	MinAckDelay          *time.Duration
+
+	// InitialMaxPathID enables the (non-interoperable) multipath extension.
+	// When non-nil, the peer is willing to use multiple paths simultaneously,
+	// up to and including the given maximum path ID.
+	InitialMaxPathID *uint64
 }
 
 // Unmarshal the transport parameters
@@ -146,7 +156,8 @@ func (p *TransportParameters) unmarshal(b []byte, sentBy protocol.Perspective, f
 			maxDatagramFrameSizeParameterID,
 			ackDelayExponentParameterID,
 			activeConnectionIDLimitParameterID,
-			minAckDelayParameterID:
+			minAckDelayParameterID,
+			initialMaxPathIDParameterID:
 			if err := p.readNumericTransportParameter(b, paramID, int(paramLen)); err != nil {
 				return err
 			}
@@ -344,6 +355,9 @@ func (p *TransportParameters) readNumericTransportParameter(b []byte, paramID tr
 			mad = math.MaxInt64
 		}
 		p.MinAckDelay = &mad
+	case initialMaxPathIDParameterID:
+		maxPathID := val
+		p.InitialMaxPathID = &maxPathID
 	default:
 		return fmt.Errorf("TransportParameter BUG: transport parameter %d not found", paramID)
 	}
@@ -457,6 +471,10 @@ func (p *TransportParameters) Marshal(pers protocol.Perspective) []byte {
 	}
 	if p.MinAckDelay != nil {
 		b = p.marshalVarintParam(b, minAckDelayParameterID, uint64(*p.MinAckDelay/time.Microsecond))
+	}
+	// Multipath (non-interoperable; quic-go to quic-go only)
+	if p.InitialMaxPathID != nil {
+		b = p.marshalVarintParam(b, initialMaxPathIDParameterID, *p.InitialMaxPathID)
 	}
 
 	if pers == protocol.PerspectiveClient && len(AdditionalTransportParametersClient) > 0 {
@@ -577,6 +595,10 @@ func (p *TransportParameters) String() string {
 	if p.MinAckDelay != nil {
 		logString += ", MinAckDelay: %s"
 		logParams = append(logParams, *p.MinAckDelay)
+	}
+	if p.InitialMaxPathID != nil {
+		logString += ", InitialMaxPathID: %d"
+		logParams = append(logParams, *p.InitialMaxPathID)
 	}
 	logString += "}"
 	return fmt.Sprintf(logString, logParams...)

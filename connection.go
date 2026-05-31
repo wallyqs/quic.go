@@ -519,6 +519,7 @@ func (c *Conn) preSetup() {
 		c.config.EnableDatagrams,
 		c.config.EnableStreamResetPartialDelivery,
 		false, // ACK_FREQUENCY is not supported yet
+		false, // multipath is not yet wired up at the connection level
 	)
 	c.rttStats = utils.NewRTTStats()
 	c.connFlowController = flowcontrol.NewConnectionFlowController(

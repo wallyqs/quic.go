@@ -18,6 +18,7 @@ type FrameParser struct {
 	supportsDatagrams     bool
 	supportsResetStreamAt bool
 	supportsAckFrequency  bool
+	supportsMultipath     bool
 
 	// To avoid allocating when parsing, keep a single ACK frame struct.
 	// It is used over and over again.
@@ -25,11 +26,12 @@ type FrameParser struct {
 }
 
 // NewFrameParser creates a new frame parser.
-func NewFrameParser(supportsDatagrams, supportsResetStreamAt, supportsAckFrequency bool) *FrameParser {
+func NewFrameParser(supportsDatagrams, supportsResetStreamAt, supportsAckFrequency, supportsMultipath bool) *FrameParser {
 	return &FrameParser{
 		supportsDatagrams:     supportsDatagrams,
 		supportsResetStreamAt: supportsResetStreamAt,
 		supportsAckFrequency:  supportsAckFrequency,
+		supportsMultipath:     supportsMultipath,
 		ackFrame:              &AckFrame{},
 	}
 }
@@ -55,7 +57,8 @@ func (p *FrameParser) ParseType(b []byte, encLevel protocol.EncryptionLevel) (Fr
 		valid := ft.isValidRFC9000() ||
 			(p.supportsDatagrams && ft.IsDatagramFrameType()) ||
 			(p.supportsResetStreamAt && ft == FrameTypeResetStreamAt) ||
-			(p.supportsAckFrequency && (ft == FrameTypeAckFrequency || ft == FrameTypeImmediateAck))
+			(p.supportsAckFrequency && (ft == FrameTypeAckFrequency || ft == FrameTypeImmediateAck)) ||
+			(p.supportsMultipath && ft.IsMultipathFrameType())
 		if !valid {
 			return 0, parsed, &qerr.TransportError{
 				ErrorCode:    qerr.FrameEncodingError,
@@ -165,6 +168,12 @@ func (p *FrameParser) ParseLessCommonFrame(frameType FrameType, data []byte, v p
 		frame, l, err = parseAckFrequencyFrame(data, v)
 	case FrameTypeImmediateAck:
 		frame = &ImmediateAckFrame{}
+	case FrameTypePathAbandon:
+		frame, l, err = parsePathAbandonFrame(data, v)
+	case FrameTypePathAvailable:
+		frame, l, err = parsePathStatusFrame(data, true, v)
+	case FrameTypePathBackup:
+		frame, l, err = parsePathStatusFrame(data, false, v)
 	default:
 		err = errUnknownFrameType
 	}
