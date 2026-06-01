@@ -1,7 +1,3 @@
-<div align="center" style="margin-bottom: 15px;">
-  <img src="./assets/quic-go-logo.png" width="700" height="auto">
-</div>
-
 # A QUIC implementation in pure Go
 
 
@@ -23,10 +19,6 @@ In addition to these base RFCs, it also implements the following RFCs:
 Support for WebTransport over HTTP/3 ([draft-ietf-webtrans-http3](https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/)) is implemented in [webtransport-go](https://github.com/quic-go/webtransport-go).
 
 Detailed documentation can be found on [quic-go.net](https://quic-go.net/docs/).
-
-## FIPS 140-3
-
-Starting with v0.60, quic-go supports use in FIPS 140-3 environments when built with Go 1.26 or newer, using Go standard library cryptography for the QUIC code paths relevant in FIPS mode; see [FIPS140.md](FIPS140.md) for details.
 
 ## Projects using quic-go
 
@@ -62,4 +54,4 @@ We are always happy to welcome new contributors! We have a number of self-contai
 
 ## License
 
-The code is licensed under the MIT license. The logo and brand assets are excluded from the MIT license. See [assets/LICENSE.md](https://github.com/quic-go/quic-go/tree/master/assets/LICENSE.md) for the full usage policy and details.
+The code is licensed under the MIT license.
