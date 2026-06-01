@@ -14,8 +14,6 @@ import (
 	"github.com/quic-go/quic-go/internal/protocol"
 	"github.com/quic-go/quic-go/internal/utils"
 	"github.com/quic-go/quic-go/internal/wire"
-	"github.com/quic-go/quic-go/qlog"
-	"github.com/quic-go/quic-go/qlogwriter"
 )
 
 // ErrTransportClosed is returned by the [Transport]'s Listen or Dial method after it was closed.
@@ -124,15 +122,10 @@ type Transport struct {
 	// The context returned from the callback is used to derive every other context used during the
 	// lifetime of the connection:
 	// * the context passed to crypto/tls (and used on the tls.ClientHelloInfo)
-	// * the context used in Config.QlogTrace
 	// * the context returned from Conn.Context
 	// * the context returned from SendStream.Context
 	// It is not used for dialed connections.
 	ConnContext func(context.Context, *ClientInfo) (context.Context, error)
-
-	// A Tracer traces events that don't belong to a single QUIC connection.
-	// Recorder.Close is called when the transport is closed.
-	Tracer qlogwriter.Recorder
 
 	mutex       sync.Mutex
 	handlers    map[protocol.ConnectionID]packetHandler
@@ -221,7 +214,6 @@ func (t *Transport) createServer(tlsConf *tls.Config, conf *Config, allow0RTT bo
 		t.ConnContext,
 		tlsConf,
 		conf,
-		t.Tracer,
 		t.closeServer,
 		*t.TokenGeneratorKey,
 		maxTokenAge,
@@ -289,11 +281,6 @@ func (t *Transport) doDial(
 		return nil, t.closeErr
 	}
 
-	var qlogTrace qlogwriter.Trace
-	if config.Tracer != nil {
-		qlogTrace = config.Tracer(ctx, true, destConnID)
-	}
-
 	logger := utils.DefaultLogger.WithPrefix("client")
 	logger.Infof("Starting new connection to %s (%s -> %s), source connection ID %s, destination connection ID %s, version %s", tlsConf.ServerName, sendConn.LocalAddr(), sendConn.RemoteAddr(), srcConnID, destConnID, version)
 
@@ -310,7 +297,6 @@ func (t *Transport) doDial(
 		initialPacketNumber,
 		use0RTT,
 		hasNegotiatedVersion,
-		qlogTrace,
 		logger,
 		version,
 	)
@@ -515,10 +501,6 @@ func (t *Transport) close(e error) {
 	}
 	t.mutex.Unlock() // closing connections requires releasing transport mutex
 	wg.Wait()
-
-	if t.Tracer != nil {
-		t.Tracer.Close()
-	}
 }
 
 // only print warnings about the UDP receive buffer size once
@@ -570,12 +552,6 @@ func (t *Transport) handlePacket(p receivedPacket) {
 	connID, err := wire.ParseConnectionID(p.data, t.connIDLen)
 	if err != nil {
 		t.logger.Debugf("error parsing connection ID on packet from %s: %s", p.remoteAddr, err)
-		if t.Tracer != nil {
-			t.Tracer.RecordEvent(qlog.PacketDropped{
-				Raw:     qlog.RawInfo{Length: int(p.Size())},
-				Trigger: qlog.PacketDropHeaderParseError,
-			})
-		}
 		p.buffer.MaybeRelease()
 		return
 	}
@@ -597,13 +573,6 @@ func (t *Transport) handlePacket(p receivedPacket) {
 	}
 	if !wire.IsLongHeaderPacket(p.data[0]) {
 		if statelessResetQueued := t.maybeSendStatelessReset(p); !statelessResetQueued {
-			if t.Tracer != nil {
-				t.Tracer.RecordEvent(qlog.PacketDropped{
-					Header:  qlog.PacketHeader{PacketType: qlog.PacketType1RTT},
-					Raw:     qlog.RawInfo{Length: int(p.Size())},
-					Trigger: qlog.PacketDropUnknownConnectionID,
-				})
-			}
 			p.buffer.Release()
 		}
 		return
@@ -613,12 +582,6 @@ func (t *Transport) handlePacket(p receivedPacket) {
 	defer t.mutex.Unlock()
 	if t.server == nil { // no server set
 		t.logger.Debugf("received a packet with an unexpected connection ID %s", connID)
-		if t.Tracer != nil {
-			t.Tracer.RecordEvent(qlog.PacketDropped{
-				Raw:     qlog.RawInfo{Length: int(p.Size())},
-				Trigger: qlog.PacketDropUnknownConnectionID,
-			})
-		}
 		p.buffer.MaybeRelease()
 		return
 	}
@@ -695,12 +658,6 @@ func (t *Transport) handleNonQUICPacket(p receivedPacket) {
 	select {
 	case t.nonQUICPackets <- p:
 	default:
-		if t.Tracer != nil {
-			t.Tracer.RecordEvent(qlog.PacketDropped{
-				Raw:     qlog.RawInfo{Length: int(p.Size())},
-				Trigger: qlog.PacketDropDOSPrevention,
-			})
-		}
 	}
 }
 
