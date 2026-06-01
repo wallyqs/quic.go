@@ -1,6 +1,7 @@
 package quic
 
 import (
+	"net"
 	"sync"
 
 	"github.com/quic-go/quic-go/internal/ackhandler"
@@ -9,12 +10,18 @@ import (
 
 // multipathPath is a path that the connection actively sends on (in addition to
 // the initial path) when the multipath extension has been negotiated.
+//
+// A client path sends via its own transport (a separate local socket) to the
+// server's address. A server path sends via the connection's socket to the
+// client's per-path remote address.
 type multipathPath struct {
-	id        ackhandler.PathID
-	connID    protocol.ConnectionID
-	transport *Transport
-	status    pathStatus
-	validated bool
+	id         ackhandler.PathID
+	connID     protocol.ConnectionID
+	transport  *Transport // set for client paths
+	remoteAddr net.Addr   // set for server paths
+	info       packetInfo // local address info, for server paths
+	status     pathStatus
+	validated  bool
 }
 
 // multipathManager tracks the set of paths a connection sends on simultaneously.
@@ -58,6 +65,32 @@ func (m *multipathManager) addPath(tr *Transport, getConnID func(ackhandler.Path
 		connID:    connID,
 		transport: tr,
 		status:    pathStatusAvailable,
+	}
+	return id, true
+}
+
+// addServerPath registers an additional path discovered by the server, keyed by
+// the client's per-path remote address. The connection ID is the one the server
+// will send to the client with on this path.
+func (m *multipathManager) addServerPath(remoteAddr net.Addr, info packetInfo, getConnID func(ackhandler.PathID) (protocol.ConnectionID, bool)) (ackhandler.PathID, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if uint64(m.nextID) > m.maxPathID {
+		return 0, false
+	}
+	id := m.nextID
+	connID, ok := getConnID(id)
+	if !ok {
+		return 0, false
+	}
+	m.nextID++
+	m.paths[id] = &multipathPath{
+		id:         id,
+		connID:     connID,
+		remoteAddr: remoteAddr,
+		info:       info,
+		status:     pathStatusAvailable,
+		validated:  true, // the client already reached us on this path
 	}
 	return id, true
 }

@@ -112,20 +112,32 @@ packet number spaces all assume a single active path.
   - **Path negotiation + setup verified end to end** on localhost
     (`integrationtests/self/multipath_test.go`).
 
-  **REMAINING — the symmetric receive side** (found by the e2e test, which is
-  skipped pending this work):
-  1. **Per-path received-packet tracking + per-path ACK generation.** The
-     `receivedPacketHandler` is a single packet number space; with multipath it
-     would mix path-0 and path-1 packet numbers in one ACK. It needs to become
-     per-path, and the connection must emit a per-path ACK (PATH-scoped) for each
-     path's received packets.
-  2. **Server-side multipath path handling.** Today the server treats a packet
-     from a new source address as a connection-migration attempt
-     (`pathManager.HandlePacket` → PATH_CHALLENGE / SwitchToPath) and hijacks the
-     path. When multipath is negotiated it must instead recognize the additional
-     path, set up server-side per-path state, and send ACKs/data back on it.
-  3. **Path validation** (PATH_CHALLENGE/RESPONSE) before a path is used; today
-     `AddMultipathPath` marks the path validated optimistically.
+  **Receive side — DONE.** The end-to-end test
+  (`integrationtests/self/multipath_test.go`) now transfers 1 MiB over a 2-path
+  connection on localhost and passes:
+  1. **Per-path received-packet tracking + per-path ACK generation** — DONE
+     (`received_packet_handler_multipath.go`); the packer emits each path's ACK
+     from that path's packet number space (`PackPacketForPath` + `currentPath`).
+  2. **Server-side multipath path handling** — DONE: a 1-RTT packet from a
+     non-primary address on a multipath connection is recognized as an additional
+     path (`serverPathForAddr`), not a migration, and the server sends ACKs back
+     on it via `sendQueue.SendProbe`.
+  3. **Per-path packet-number decoding** — DONE: additional-path packets are
+     decoded against that path's own largest received packet number
+     (`UnpackShortHeader(..., largestRcvd)`), since each path has its own packet
+     number space.
+
+## Status: end-to-end multipath transfer works on localhost.
+
+Remaining hardening (not blocking a working transfer):
+- **Path validation** (PATH_CHALLENGE/RESPONSE) before using a path; today
+  `AddMultipathPath` marks the path validated optimistically.
+- **Per-path loss-detection timer**: the connection's loss-detection alarm
+  currently only considers the initial path's spaces. Additional-path losses are
+  detected on incoming ACKs (`detectLostPacketsOnPath`), but a fully independent
+  per-path PTO/alarm is still TODO.
+- **Throughput tuning / real-network validation** (AWS): scheduler policy,
+  per-path MTU, and pacing under real multi-path conditions.
 
 - **Phase 6 — public API + validation.** Expose adding/activating paths; test
   aggregate throughput across two paths.

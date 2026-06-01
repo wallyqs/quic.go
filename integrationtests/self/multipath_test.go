@@ -12,24 +12,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestMultipathDataTransfer exercises the experimental multipath data path:
-// a client adds a second path (a second local transport) and transfers data
-// over the single logical connection. Both client transports reach the same
-// server, so this validates the per-path send/ACK plumbing on localhost.
+// TestMultipathDataTransfer exercises the experimental multipath data path
+// end to end: a client adds a second path (a second local transport) and
+// transfers 1 MiB over the single logical connection. Both client transports
+// reach the same server, so this validates per-path packet numbering,
+// congestion control, ACK generation/accounting, the scheduler/send-loop
+// fan-out, the receive-side per-path packet-number decoding and ACK demux, and
+// server-side path recognition — on localhost.
 func TestMultipathDataTransfer(t *testing.T) {
-	// The send-side multipath data plane (per-path packet numbers, congestion
-	// control, ACK accounting, scheduler, send-loop fan-out), path negotiation
-	// and path setup work end to end. A complete transfer additionally needs the
-	// symmetric RECEIVE side, which is not yet implemented:
-	//   - per-path received-packet tracking + per-path ACK generation (today the
-	//     receivedPacketHandler is a single packet number space, so it would mix
-	//     path-0 and path-1 packet numbers in one ACK);
-	//   - server-side multipath path handling (today the server treats a packet
-	//     from a new address as a connection-migration attempt and hijacks the
-	//     path instead of recognizing it as an additional multipath path).
-	// This test is the validation target for that remaining work. See MULTIPATH.md.
-	t.Skip("multipath receive-side (per-path ACK generation + server-side paths) not yet implemented")
-
 	server, err := quic.Listen(newUDPConnLocalhost(t), getTLSConfig(), getQuicConfig(&quic.Config{EnableMultipath: true}))
 	require.NoError(t, err)
 	defer server.Close()

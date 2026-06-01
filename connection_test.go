@@ -635,7 +635,7 @@ func TestConnectionUnpacking(t *testing.T) {
 	packet = getShortHeaderPacket(t, tc.remoteAddr, tc.srcConnID, 0x37, nil)
 	packet.ecn = protocol.ECT1
 	packet.rcvTime = rcvTime
-	unpacker.EXPECT().UnpackShortHeader(gomock.Any(), gomock.Any()).Return(
+	unpacker.EXPECT().UnpackShortHeader(gomock.Any(), gomock.Any(), gomock.Any()).Return(
 		protocol.PacketNumber(0x1337), protocol.PacketNumberLen2, protocol.KeyPhaseZero, []byte{0} /* PADDING */, nil,
 	)
 	wasProcessed, err = tc.conn.handleOnePacket(packet, 0)
@@ -795,7 +795,7 @@ func testConnectionUnpackFailureFatal(t *testing.T, unpackErr error) error {
 	)
 
 	tc.connRunner.EXPECT().ReplaceWithClosed(gomock.Any(), gomock.Any(), gomock.Any())
-	unpacker.EXPECT().UnpackShortHeader(gomock.Any(), gomock.Any()).Return(protocol.PacketNumber(0), protocol.PacketNumberLen(0), protocol.KeyPhaseBit(0), nil, unpackErr)
+	unpacker.EXPECT().UnpackShortHeader(gomock.Any(), gomock.Any(), gomock.Any()).Return(protocol.PacketNumber(0), protocol.PacketNumberLen(0), protocol.KeyPhaseBit(0), nil, unpackErr)
 	tc.packer.EXPECT().PackConnectionClose(gomock.Any(), gomock.Any(), protocol.Version1).Return(&coalescedPacket{buffer: getPacketBuffer()}, nil)
 	errChan := make(chan error, 1)
 	go func() { errChan <- tc.conn.run() }()
@@ -840,7 +840,7 @@ func testConnectionUnpackFailureDropped(t *testing.T, unpackErr error, packetDro
 			connectionOptTracer(&eventRecorder),
 		)
 
-		unpacker.EXPECT().UnpackShortHeader(gomock.Any(), gomock.Any()).Return(protocol.PacketNumber(0), protocol.PacketNumberLen(0), protocol.KeyPhaseBit(0), nil, unpackErr)
+		unpacker.EXPECT().UnpackShortHeader(gomock.Any(), gomock.Any(), gomock.Any()).Return(protocol.PacketNumber(0), protocol.PacketNumberLen(0), protocol.KeyPhaseBit(0), nil, unpackErr)
 		errChan := make(chan error, 1)
 		go func() { errChan <- tc.conn.run() }()
 
@@ -920,7 +920,7 @@ func TestConnectionRemoteClose(t *testing.T) {
 			ReasonPhrase: "foobar",
 		}).Append(nil, protocol.Version1)
 		require.NoError(t, err)
-		unpacker.EXPECT().UnpackShortHeader(gomock.Any(), gomock.Any()).Return(protocol.PacketNumber(1), protocol.PacketNumberLen2, protocol.KeyPhaseBit(0), ccf, nil)
+		unpacker.EXPECT().UnpackShortHeader(gomock.Any(), gomock.Any(), gomock.Any()).Return(protocol.PacketNumber(1), protocol.PacketNumberLen2, protocol.KeyPhaseBit(0), ccf, nil)
 
 		tc.connRunner.EXPECT().ReplaceWithClosed(gomock.Any(), gomock.Any(), gomock.Any())
 
@@ -1543,8 +1543,8 @@ func testConnectionReceivePrioritization(t *testing.T, handshakeComplete bool, n
 	var counter int
 	var testDone bool
 	done := make(chan struct{})
-	unpacker.EXPECT().UnpackShortHeader(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(rcvTime monotime.Time, data []byte) (protocol.PacketNumber, protocol.PacketNumberLen, protocol.KeyPhaseBit, []byte, error) {
+	unpacker.EXPECT().UnpackShortHeader(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(rcvTime monotime.Time, data []byte, _ *protocol.PacketNumber) (protocol.PacketNumber, protocol.PacketNumberLen, protocol.KeyPhaseBit, []byte, error) {
 			counter++
 			if counter == numPackets {
 				testDone = true
@@ -2053,8 +2053,8 @@ func testConnectionKeepAlive(t *testing.T, enable, expectKeepAlive bool) {
 
 		var unpackTime, packTime monotime.Time
 		done := make(chan struct{})
-		unpacker.EXPECT().UnpackShortHeader(gomock.Any(), gomock.Any()).DoAndReturn(
-			func(t monotime.Time, bytes []byte) (protocol.PacketNumber, protocol.PacketNumberLen, protocol.KeyPhaseBit, []byte, error) {
+		unpacker.EXPECT().UnpackShortHeader(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+			func(t monotime.Time, bytes []byte, _ *protocol.PacketNumber) (protocol.PacketNumber, protocol.PacketNumberLen, protocol.KeyPhaseBit, []byte, error) {
 				unpackTime = monotime.Now()
 				return protocol.PacketNumber(1), protocol.PacketNumberLen1, protocol.KeyPhaseZero, []byte{0} /* PADDING */, nil
 			},
@@ -3239,7 +3239,7 @@ func testConnectionPathValidation(t *testing.T, isNATRebinding bool) {
 			payload = []byte{1} // PING frame
 		}
 		gomock.InOrder(
-			unpacker.EXPECT().UnpackShortHeader(gomock.Any(), gomock.Any()).Return(
+			unpacker.EXPECT().UnpackShortHeader(gomock.Any(), gomock.Any(), gomock.Any()).Return(
 				protocol.PacketNumber(10), protocol.PacketNumberLen2, protocol.KeyPhaseZero, payload, nil,
 			),
 			tc.packer.EXPECT().PackPathProbePacket(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
@@ -3278,7 +3278,7 @@ func testConnectionPathValidation(t *testing.T, isNATRebinding bool) {
 		data, err := (&wire.PathResponseFrame{Data: pathChallenge.Data}).Append(nil, protocol.Version1)
 		require.NoError(t, err)
 		calls := []any{
-			unpacker.EXPECT().UnpackShortHeader(gomock.Any(), gomock.Any()).Return(
+			unpacker.EXPECT().UnpackShortHeader(gomock.Any(), gomock.Any(), gomock.Any()).Return(
 				protocol.PacketNumber(11), protocol.PacketNumberLen2, protocol.KeyPhaseZero, data, nil,
 			),
 		}
@@ -3323,7 +3323,7 @@ func testConnectionPathValidation(t *testing.T, isNATRebinding bool) {
 			payload, err = (&wire.PathResponseFrame{Data: pathChallenge.Data}).Append(payload, protocol.Version1)
 			require.NoError(t, err)
 			gomock.InOrder(
-				unpacker.EXPECT().UnpackShortHeader(gomock.Any(), gomock.Any()).Return(
+				unpacker.EXPECT().UnpackShortHeader(gomock.Any(), gomock.Any(), gomock.Any()).Return(
 					protocol.PacketNumber(12), protocol.PacketNumberLen2, protocol.KeyPhaseZero, payload, nil,
 				),
 				tc.sendConn.EXPECT().ChangeRemoteAddr(newRemoteAddr, gomock.Any()).Do(

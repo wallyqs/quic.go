@@ -106,12 +106,12 @@ func (u *packetUnpacker) UnpackLongHeader(hdr *wire.Header, data []byte) (*unpac
 	}, nil
 }
 
-func (u *packetUnpacker) UnpackShortHeader(rcvTime monotime.Time, data []byte) (protocol.PacketNumber, protocol.PacketNumberLen, protocol.KeyPhaseBit, []byte, error) {
+func (u *packetUnpacker) UnpackShortHeader(rcvTime monotime.Time, data []byte, largestRcvd *protocol.PacketNumber) (protocol.PacketNumber, protocol.PacketNumberLen, protocol.KeyPhaseBit, []byte, error) {
 	opener, err := u.cs.Get1RTTOpener()
 	if err != nil {
 		return 0, 0, 0, nil, err
 	}
-	pn, pnLen, kp, decrypted, err := u.unpackShortHeaderPacket(opener, rcvTime, data)
+	pn, pnLen, kp, decrypted, err := u.unpackShortHeaderPacket(opener, rcvTime, data, largestRcvd)
 	if err != nil {
 		return 0, 0, 0, nil, err
 	}
@@ -144,7 +144,7 @@ func (u *packetUnpacker) unpackLongHeaderPacket(opener handshake.LongHeaderOpene
 	return extHdr, decrypted, nil
 }
 
-func (u *packetUnpacker) unpackShortHeaderPacket(opener handshake.ShortHeaderOpener, rcvTime monotime.Time, data []byte) (protocol.PacketNumber, protocol.PacketNumberLen, protocol.KeyPhaseBit, []byte, error) {
+func (u *packetUnpacker) unpackShortHeaderPacket(opener handshake.ShortHeaderOpener, rcvTime monotime.Time, data []byte, largestRcvd *protocol.PacketNumber) (protocol.PacketNumber, protocol.PacketNumberLen, protocol.KeyPhaseBit, []byte, error) {
 	l, pn, pnLen, kp, parseErr := u.unpackShortHeader(opener, data)
 	// If the reserved bits are set incorrectly, we still need to continue unpacking.
 	// This avoids a timing side-channel, which otherwise might allow an attacker
@@ -152,7 +152,14 @@ func (u *packetUnpacker) unpackShortHeaderPacket(opener handshake.ShortHeaderOpe
 	if parseErr != nil && parseErr != wire.ErrInvalidReservedBits {
 		return 0, 0, 0, nil, &headerParseError{parseErr}
 	}
-	pn = opener.DecodePacketNumber(pn, pnLen)
+	// For multipath, decode the packet number against the path's own largest
+	// received packet number (each path has its own packet number space). The
+	// initial path passes nil and uses the opener's shared state.
+	if largestRcvd != nil {
+		pn = protocol.DecodePacketNumber(pnLen, *largestRcvd, pn)
+	} else {
+		pn = opener.DecodePacketNumber(pn, pnLen)
+	}
 	decrypted, err := opener.Open(data[l:l], data[l:], rcvTime, pn, kp, data[:l])
 	if err != nil {
 		return 0, 0, 0, nil, err

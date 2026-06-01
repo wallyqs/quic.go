@@ -29,7 +29,7 @@ import (
 
 type unpacker interface {
 	UnpackLongHeader(hdr *wire.Header, data []byte) (*unpackedPacket, error)
-	UnpackShortHeader(rcvTime monotime.Time, data []byte) (protocol.PacketNumber, protocol.PacketNumberLen, protocol.KeyPhaseBit, []byte, error)
+	UnpackShortHeader(rcvTime monotime.Time, data []byte, largestRcvd *protocol.PacketNumber) (protocol.PacketNumber, protocol.PacketNumberLen, protocol.KeyPhaseBit, []byte, error)
 }
 
 type cryptoStreamHandler interface {
@@ -156,6 +156,12 @@ type Conn struct {
 	localConnIDToPath map[protocol.ConnectionID]ackhandler.PathID
 	// multipathAddQueue carries AddMultipathPath requests to the run loop.
 	multipathAddQueue chan *multipathAddRequest
+	// serverAddrToPath maps a client's per-path remote address to a server-side
+	// path ID (server perspective only).
+	serverAddrToPath map[string]ackhandler.PathID
+	// largestRcvdByPath tracks the largest received 1-RTT packet number per
+	// additional path, used to decode packet numbers in that path's space.
+	largestRcvdByPath map[ackhandler.PathID]protocol.PacketNumber
 
 	streamsMap      *streamsMap
 	connIDManager   *connIDManager
@@ -1224,16 +1230,34 @@ func (c *Conn) handleShortHeaderPacket(
 		})
 		return false, nil
 	}
+	// Server-side multipath: a 1-RTT packet from a non-primary address on a
+	// multipath connection is an additional path. Determine its path before
+	// unpacking, since the packet number must be decoded in the path's own space.
+	if c.perspective == protocol.PerspectiveServer && c.multipath != nil && !addrsEqual(p.remoteAddr, c.RemoteAddr()) {
+		p.path = c.serverPathForAddr(p.remoteAddr, p.info)
+	}
 	// Learn the connection-ID-to-path association for multipath ACK demuxing:
-	// packets tagged with a non-initial path (by the receiving transport) tell
-	// us which path 1-RTT packets on this local connection ID belong to.
+	// packets tagged with a non-initial path tell us which path 1-RTT packets on
+	// this local connection ID belong to.
 	if p.path != ackhandler.InitialPathID {
 		if c.localConnIDToPath == nil {
 			c.localConnIDToPath = make(map[protocol.ConnectionID]ackhandler.PathID)
 		}
 		c.localConnIDToPath[destConnID] = p.path
 	}
-	pn, pnLen, keyPhase, data, err := c.unpacker.UnpackShortHeader(p.rcvTime, p.data)
+	// On additional paths, decode the packet number against that path's own
+	// largest received packet number (separate packet number space).
+	var largestRcvd *protocol.PacketNumber
+	if p.path != ackhandler.InitialPathID {
+		l := protocol.InvalidPacketNumber
+		if c.largestRcvdByPath != nil {
+			if v, ok := c.largestRcvdByPath[p.path]; ok {
+				l = v
+			}
+		}
+		largestRcvd = &l
+	}
+	pn, pnLen, keyPhase, data, err := c.unpacker.UnpackShortHeader(p.rcvTime, p.data, largestRcvd)
 	if err != nil {
 		// Stateless reset packets (see RFC 9000, section 10.3):
 		// * fill the entire UDP datagram (i.e. they cannot be part of a coalesced packet)
@@ -1250,6 +1274,12 @@ func (c *Conn) handleShortHeaderPacket(
 		return false, err
 	}
 	c.largestRcvdAppData = max(c.largestRcvdAppData, pn)
+	if p.path != ackhandler.InitialPathID {
+		if c.largestRcvdByPath == nil {
+			c.largestRcvdByPath = make(map[ackhandler.PathID]protocol.PacketNumber)
+		}
+		c.largestRcvdByPath[p.path] = max(c.largestRcvdByPath[p.path], pn)
+	}
 
 	if c.logger.Debug() {
 		c.logger.Debugf("<- Reading packet %d (%d bytes) for connection %s, 1-RTT", pn, p.Size(), destConnID)
@@ -1302,6 +1332,11 @@ func (c *Conn) handleShortHeaderPacket(
 		return true, nil
 	}
 	if addrsEqual(p.remoteAddr, c.RemoteAddr()) {
+		return true, nil
+	}
+	// On a multipath connection, additional paths are handled above, not via
+	// connection migration.
+	if c.multipath != nil {
 		return true, nil
 	}
 
@@ -2890,11 +2925,43 @@ func (c *Conn) sendMultipathPackets(now monotime.Time) error {
 			largestAcked = sp.Ack.LargestAcked()
 		}
 		c.sentPacketHandler.SentPacketForPath(id, now, sp.PacketNumber, largestAcked, sp.StreamFrames, sp.Frames, ecn, sp.Length, sp.IsPathMTUProbePacket)
-		if _, err := p.transport.WriteTo(buf.Data, c.conn.RemoteAddr()); err != nil {
-			return err
+		if p.transport != nil {
+			// client path: send via the path's own socket to the server
+			if _, err := p.transport.WriteTo(buf.Data, c.conn.RemoteAddr()); err != nil {
+				return err
+			}
+		} else {
+			// server path: send via our socket to the client's per-path address
+			c.sendQueue.SendProbe(buf, p.remoteAddr, p.info)
 		}
 	}
 	return nil
+}
+
+// serverPathForAddr returns the server-side path ID for a client's per-path
+// remote address, creating the path (and its per-path send/receive state) the
+// first time the address is seen. It must be called on the run-loop goroutine.
+func (c *Conn) serverPathForAddr(remoteAddr net.Addr, info packetInfo) ackhandler.PathID {
+	if c.serverAddrToPath == nil {
+		c.serverAddrToPath = make(map[string]ackhandler.PathID)
+	}
+	key := remoteAddr.String()
+	if id, ok := c.serverAddrToPath[key]; ok {
+		return id
+	}
+	id, ok := c.multipath.addServerPath(remoteAddr, info, func(pid ackhandler.PathID) (protocol.ConnectionID, bool) {
+		return c.connIDManager.GetConnIDForPath(pathID(pid))
+	})
+	if !ok {
+		// path limit reached or no connection ID available: fall back to the
+		// initial path (the packet is still processed, just not on a new path).
+		return ackhandler.InitialPathID
+	}
+	c.serverAddrToPath[key] = id
+	c.sentPacketHandler.AddPath(id)
+	c.receivedPacketHandler.AddPath(id)
+	c.scheduleSending()
+	return id
 }
 
 func (c *Conn) sendPackedCoalescedPacket(packet *coalescedPacket, ecn protocol.ECN, now monotime.Time) error {
