@@ -12,6 +12,7 @@ package quic
 import (
 	reflect "reflect"
 
+	ackhandler "github.com/quic-go/quic-go/internal/ackhandler"
 	monotime "github.com/quic-go/quic-go/internal/monotime"
 	protocol "github.com/quic-go/quic-go/internal/protocol"
 	wire "github.com/quic-go/quic-go/internal/wire"
@@ -76,6 +77,44 @@ func (c *MockAckFrameSourceGetAckFrameCall) Do(f func(protocol.EncryptionLevel, 
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockAckFrameSourceGetAckFrameCall) DoAndReturn(f func(protocol.EncryptionLevel, monotime.Time, bool) *wire.AckFrame) *MockAckFrameSourceGetAckFrameCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// GetAckFrameForPath mocks base method.
+func (m *MockAckFrameSource) GetAckFrameForPath(arg0 ackhandler.PathID, now monotime.Time, onlyIfQueued bool) *wire.AckFrame {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetAckFrameForPath", arg0, now, onlyIfQueued)
+	ret0, _ := ret[0].(*wire.AckFrame)
+	return ret0
+}
+
+// GetAckFrameForPath indicates an expected call of GetAckFrameForPath.
+func (mr *MockAckFrameSourceMockRecorder) GetAckFrameForPath(arg0, now, onlyIfQueued any) *MockAckFrameSourceGetAckFrameForPathCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAckFrameForPath", reflect.TypeOf((*MockAckFrameSource)(nil).GetAckFrameForPath), arg0, now, onlyIfQueued)
+	return &MockAckFrameSourceGetAckFrameForPathCall{Call: call}
+}
+
+// MockAckFrameSourceGetAckFrameForPathCall wrap *gomock.Call
+type MockAckFrameSourceGetAckFrameForPathCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockAckFrameSourceGetAckFrameForPathCall) Return(arg0 *wire.AckFrame) *MockAckFrameSourceGetAckFrameForPathCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockAckFrameSourceGetAckFrameForPathCall) Do(f func(ackhandler.PathID, monotime.Time, bool) *wire.AckFrame) *MockAckFrameSourceGetAckFrameForPathCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockAckFrameSourceGetAckFrameForPathCall) DoAndReturn(f func(ackhandler.PathID, monotime.Time, bool) *wire.AckFrame) *MockAckFrameSourceGetAckFrameForPathCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

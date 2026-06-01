@@ -116,6 +116,7 @@ type frameSource interface {
 
 type ackFrameSource interface {
 	GetAckFrame(_ protocol.EncryptionLevel, now monotime.Time, onlyIfQueued bool) *wire.AckFrame
+	GetAckFrameForPath(_ ackhandler.PathID, now monotime.Time, onlyIfQueued bool) *wire.AckFrame
 }
 
 type packetPacker struct {
@@ -138,6 +139,21 @@ type packetPacker struct {
 	rand                rand.Rand
 
 	numNonAckElicitingAcks int
+
+	// currentPath is the multipath path currently being packed for. It is set
+	// around PackPacketForPath so that the 1-RTT ACK is taken from the right
+	// path's packet number space. The packer is only used on the run-loop
+	// goroutine, so this single field is safe.
+	currentPath ackhandler.PathID
+}
+
+// get1RTTAckFrame returns the 1-RTT ACK frame for the path currently being
+// packed for (the initial path unless PackPacketForPath set currentPath).
+func (p *packetPacker) get1RTTAckFrame(now monotime.Time, onlyIfQueued bool) *wire.AckFrame {
+	if p.currentPath != ackhandler.InitialPathID {
+		return p.acks.GetAckFrameForPath(p.currentPath, now, onlyIfQueued)
+	}
+	return p.acks.GetAckFrame(protocol.Encryption1RTT, now, onlyIfQueued)
 }
 
 var _ packer = &packetPacker{}
@@ -485,7 +501,10 @@ func (p *packetPacker) PackPacketForPath(pathID ackhandler.PathID, connID protoc
 	}
 	pn, pnLen := p.pnManager.PeekPacketNumberForPath(pathID)
 	hdrLen := wire.ShortHeaderLen(connID, pnLen)
+	// Pack the ACK from this path's packet number space.
+	p.currentPath = pathID
 	pl := p.maybeGetShortHeaderPacket(sealer, hdrLen, maxPacketSize, false, now, v)
+	p.currentPath = ackhandler.InitialPathID
 	if pl.length == 0 {
 		return shortHeaderPacket{}, nil, errNothingToPack
 	}
@@ -659,7 +678,7 @@ func (p *packetPacker) composeNextPacket(
 	v protocol.Version,
 ) payload {
 	if onlyAck {
-		if ack := p.acks.GetAckFrame(protocol.Encryption1RTT, now, true); ack != nil {
+		if ack := p.get1RTTAckFrame(now, true); ack != nil {
 			ack.Truncate(maxPayloadSize, v)
 			return payload{ack: ack, length: ack.Length(v)}
 		}
@@ -671,7 +690,7 @@ func (p *packetPacker) composeNextPacket(
 
 	var pl payload
 	if ackAllowed {
-		if ack := p.acks.GetAckFrame(protocol.Encryption1RTT, now, !hasRetransmission && !hasData); ack != nil {
+		if ack := p.get1RTTAckFrame(now, !hasRetransmission && !hasData); ack != nil {
 			ack.Truncate(maxPayloadSize, v)
 			pl.ack = ack
 			pl.length += ack.Length(v)

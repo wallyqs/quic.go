@@ -618,7 +618,7 @@ func TestPackPacketForPath(t *testing.T) {
 	tp.pnManager.EXPECT().PeekPacketNumberForPath(pathID).Return(protocol.PacketNumber(0x7), protocol.PacketNumberLen2)
 	tp.pnManager.EXPECT().PopPacketNumberForPath(pathID).Return(protocol.PacketNumber(0x7))
 	tp.sealingManager.EXPECT().Get1RTTSealer().Return(newMockShortHeaderSealer(mockCtrl), nil)
-	tp.ackFramer.EXPECT().GetAckFrame(protocol.Encryption1RTT, gomock.Any(), false)
+	tp.ackFramer.EXPECT().GetAckFrameForPath(pathID, gomock.Any(), false)
 	f := &wire.StreamFrame{StreamID: 5, Data: []byte{0xde, 0xca, 0xfb, 0xad}}
 	tp.framer.EXPECT().HasData().Return(true)
 	expectAppendFrames(tp.framer, nil, []ackhandler.StreamFrame{{Frame: f}})
