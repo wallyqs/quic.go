@@ -69,3 +69,17 @@ func TestMultipathManagerSchedulablePaths(t *testing.T) {
 	// feed into the scheduler: only id1 is selected
 	require.Equal(t, []ackhandler.PathID{id1}, selectSendablePaths(sps))
 }
+
+func TestConnPathForConnID(t *testing.T) {
+	connIDA := protocol.ParseConnectionID([]byte{1, 1, 1, 1})
+	connIDB := protocol.ParseConnectionID([]byte{2, 2, 2, 2})
+
+	// a connection without the multipath map attributes everything to the initial path
+	c := &Conn{}
+	require.Equal(t, ackhandler.InitialPathID, c.pathForConnID(connIDA))
+
+	c.localConnIDToPath = map[protocol.ConnectionID]ackhandler.PathID{connIDA: 1}
+	require.Equal(t, ackhandler.PathID(1), c.pathForConnID(connIDA))
+	// an unmapped connection ID falls back to the initial path
+	require.Equal(t, ackhandler.InitialPathID, c.pathForConnID(connIDB))
+}

@@ -110,11 +110,10 @@ packet number spaces all assume a single active path.
      registration, `multipath.addPath`, `sentPacketHandler.AddPath`) is ready.
   2. **Path validation.** Send PATH_CHALLENGE on the new path and only mark it
      validated (so the scheduler sends on it) once the PATH_RESPONSE arrives.
-  3. **Receive-side ACK demux.** Route incoming 1-RTT ACKs to
-     `ReceivedAckForPath(id)` based on the local connection ID the packet
-     arrived on. Without this, ACKs for multipath packets are misattributed to
-     the initial path's congestion controller. This is required for the data
-     path to be correct, not just functional.
+  3. **Receive-side ACK demux.** DONE (mechanism): incoming 1-RTT ACKs are
+     routed to `ReceivedAckForPath(id)` based on the local destination
+     connection ID they arrived on (`Conn.pathForConnID` +
+     `localConnIDToPath`). The map is populated by the path-add flow (piece 1).
 
 - **Phase 6 — public API + validation.** Expose adding/activating paths; test
   aggregate throughput across two paths.

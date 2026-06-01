@@ -146,6 +146,10 @@ type Conn struct {
 	// multipath tracks additional simultaneously-active paths. It is only
 	// non-nil once the multipath extension has been negotiated.
 	multipath *multipathManager
+	// localConnIDToPath maps one of our (local) connection IDs to the path that
+	// 1-RTT packets arriving on it belong to, for multipath ACK demultiplexing.
+	// A connection ID not present here belongs to the initial path.
+	localConnIDToPath map[protocol.ConnectionID]ackhandler.PathID
 
 	streamsMap      *streamsMap
 	connIDManager   *connIDManager
@@ -1850,7 +1854,7 @@ func (c *Conn) handleFrames(
 				continue
 			}
 			wire.LogFrame(c.logger, ackFrame, false)
-			handleErr = c.handleAckFrame(ackFrame, encLevel, rcvTime)
+			handleErr = c.handleAckFrame(ackFrame, encLevel, c.pathForConnID(destConnID), rcvTime)
 		} else if frameType.IsDatagramFrameType() {
 			datagramFrame, l, err := c.frameParser.ParseDatagramFrame(frameType, data, c.version)
 			if err != nil {
@@ -2124,8 +2128,29 @@ func (c *Conn) handleHandshakeDoneFrame(rcvTime monotime.Time) error {
 	return nil
 }
 
-func (c *Conn) handleAckFrame(frame *wire.AckFrame, encLevel protocol.EncryptionLevel, rcvTime monotime.Time) error {
-	acked1RTTPacket, err := c.sentPacketHandler.ReceivedAck(frame, encLevel, c.lastPacketReceivedTime)
+// pathForConnID returns the path that 1-RTT packets arriving on the given
+// (local) destination connection ID belong to. Unmapped connection IDs — and
+// all non-multipath connections — belong to the initial path.
+func (c *Conn) pathForConnID(destConnID protocol.ConnectionID) ackhandler.PathID {
+	if c.localConnIDToPath == nil {
+		return ackhandler.InitialPathID
+	}
+	if id, ok := c.localConnIDToPath[destConnID]; ok {
+		return id
+	}
+	return ackhandler.InitialPathID
+}
+
+func (c *Conn) handleAckFrame(frame *wire.AckFrame, encLevel protocol.EncryptionLevel, pathID ackhandler.PathID, rcvTime monotime.Time) error {
+	var acked1RTTPacket bool
+	var err error
+	if encLevel == protocol.Encryption1RTT && pathID != ackhandler.InitialPathID {
+		// ACK received on an additional multipath path: account for it against
+		// that path's congestion controller and packet number space.
+		acked1RTTPacket, err = c.sentPacketHandler.ReceivedAckForPath(frame, pathID, c.lastPacketReceivedTime)
+	} else {
+		acked1RTTPacket, err = c.sentPacketHandler.ReceivedAck(frame, encLevel, c.lastPacketReceivedTime)
+	}
 	if err != nil {
 		return err
 	}
