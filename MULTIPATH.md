@@ -101,19 +101,31 @@ packet number spaces all assume a single active path.
     case. `Conn.multipath` is initialized in `applyTransportParameters` when
     multipath is negotiated. No-op (and zero behavior change) when multipath is off.
 
-- **Phase 6 — public API + validation (REMAINING).** These are the final,
-  interlocking pieces; they need real multi-path network validation (e.g. AWS):
-  1. **Thread-safe path-add API.** A public `Conn` method to add a path must
-     post the work to the run-loop goroutine, since `connIDManager` and
-     `sentPacketHandler` are owned by it (calling them from a user goroutine
-     would race). The plumbing (transport init, connection-ID routing
-     registration, `multipath.addPath`, `sentPacketHandler.AddPath`) is ready.
-  2. **Path validation.** Send PATH_CHALLENGE on the new path and only mark it
-     validated (so the scheduler sends on it) once the PATH_RESPONSE arrives.
-  3. **Receive-side ACK demux.** DONE (mechanism): incoming 1-RTT ACKs are
-     routed to `ReceivedAckForPath(id)` based on the local destination
-     connection ID they arrived on (`Conn.pathForConnID` +
-     `localConnIDToPath`). The map is populated by the path-add flow (piece 1).
+- **Phase 6 — public API + send path (DONE); receive side (REMAINING).**
+  - **Public path-add API DONE:** `Conn.AddMultipathPath(tr *Transport)` posts a
+    request to the run-loop goroutine (`multipathAddQueue` + `drainMultipathAddQueue`),
+    which sets up the path's connection ID, per-path sent-packet state, and a
+    path-tagging packet handler (`multipathConnHandler`). Thread-safe.
+  - **Receive-side ACK demux DONE (mechanism):** received packets are tagged with
+    their path by the transport they arrive on; we learn the destination
+    connection ID → path mapping and route 1-RTT ACKs to `ReceivedAckForPath`.
+  - **Path negotiation + setup verified end to end** on localhost
+    (`integrationtests/self/multipath_test.go`).
+
+  **REMAINING — the symmetric receive side** (found by the e2e test, which is
+  skipped pending this work):
+  1. **Per-path received-packet tracking + per-path ACK generation.** The
+     `receivedPacketHandler` is a single packet number space; with multipath it
+     would mix path-0 and path-1 packet numbers in one ACK. It needs to become
+     per-path, and the connection must emit a per-path ACK (PATH-scoped) for each
+     path's received packets.
+  2. **Server-side multipath path handling.** Today the server treats a packet
+     from a new source address as a connection-migration attempt
+     (`pathManager.HandlePacket` → PATH_CHALLENGE / SwitchToPath) and hijacks the
+     path. When multipath is negotiated it must instead recognize the additional
+     path, set up server-side per-path state, and send ACKs/data back on it.
+  3. **Path validation** (PATH_CHALLENGE/RESPONSE) before a path is used; today
+     `AddMultipathPath` marks the path validated optimistically.
 
 - **Phase 6 — public API + validation.** Expose adding/activating paths; test
   aggregate throughput across two paths.

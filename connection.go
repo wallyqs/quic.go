@@ -55,6 +55,10 @@ type receivedPacket struct {
 	ecn protocol.ECN
 
 	info packetInfo // only valid if the contained IP address is valid
+
+	// path is the multipath path this packet arrived on, determined by the
+	// transport (local socket) it was received on. The initial path is 0.
+	path ackhandler.PathID
 }
 
 type receivedPacketWithDatagramID struct {
@@ -150,6 +154,8 @@ type Conn struct {
 	// 1-RTT packets arriving on it belong to, for multipath ACK demultiplexing.
 	// A connection ID not present here belongs to the initial path.
 	localConnIDToPath map[protocol.ConnectionID]ackhandler.PathID
+	// multipathAddQueue carries AddMultipathPath requests to the run loop.
+	multipathAddQueue chan *multipathAddRequest
 
 	streamsMap      *streamsMap
 	connIDManager   *connIDManager
@@ -564,6 +570,7 @@ func (c *Conn) preSetup() {
 	c.notifyReceivedPacket = make(chan struct{}, 1)
 	c.closeChan = make(chan struct{}, 1)
 	c.sendingScheduled = make(chan struct{}, 1)
+	c.multipathAddQueue = make(chan *multipathAddRequest, 4)
 	c.handshakeCompleteChan = make(chan struct{})
 
 	now := monotime.Now()
@@ -687,6 +694,11 @@ runLoop:
 					continue
 				}
 			}
+		}
+
+		// Process any pending AddMultipathPath requests on the run-loop goroutine.
+		if c.multipath != nil {
+			c.drainMultipathAddQueue()
 		}
 
 		// Check for loss detection timeout.
@@ -1211,6 +1223,15 @@ func (c *Conn) handleShortHeaderPacket(
 			Trigger:    qlog.PacketDropHeaderParseError,
 		})
 		return false, nil
+	}
+	// Learn the connection-ID-to-path association for multipath ACK demuxing:
+	// packets tagged with a non-initial path (by the receiving transport) tell
+	// us which path 1-RTT packets on this local connection ID belong to.
+	if p.path != ackhandler.InitialPathID {
+		if c.localConnIDToPath == nil {
+			c.localConnIDToPath = make(map[protocol.ConnectionID]ackhandler.PathID)
+		}
+		c.localConnIDToPath[destConnID] = p.path
 	}
 	pn, pnLen, keyPhase, data, err := c.unpacker.UnpackShortHeader(p.rcvTime, p.data)
 	if err != nil {
@@ -2387,12 +2408,6 @@ func (c *Conn) restoreTransportParameters(params *wire.TransportParameters) {
 	c.connIDGenerator.SetMaxActiveConnIDs(params.ActiveConnectionIDLimit)
 	c.connFlowController.UpdateSendWindow(params.InitialMaxData)
 	c.streamsMap.HandleTransportParameters(params)
-	// If both endpoints advertised multipath support, initialize the multipath
-	// manager. The maximum path ID is the smaller of the two advertised values.
-	if c.config.EnableMultipath && params.InitialMaxPathID != nil {
-		maxPathID := min(*params.InitialMaxPathID, uint64(protocol.MultipathMaxPathID))
-		c.multipath = newMultipathManager(maxPathID)
-	}
 }
 
 func (c *Conn) handleTransportParameters(params *wire.TransportParameters) error {
@@ -2487,6 +2502,12 @@ func (c *Conn) applyTransportParameters() {
 		maxPacketSize,
 		c.qlogger,
 	)
+	// If both endpoints advertised multipath support, initialize the multipath
+	// manager. The maximum path ID is the smaller of the two advertised values.
+	if c.config.EnableMultipath && params.InitialMaxPathID != nil {
+		maxPathID := min(*params.InitialMaxPathID, uint64(protocol.MultipathMaxPathID))
+		c.multipath = newMultipathManager(maxPathID)
+	}
 }
 
 func (c *Conn) triggerSending(now monotime.Time) error {
@@ -3194,6 +3215,103 @@ func (c *Conn) AddPath(t *Transport) (*Path, error) {
 			)
 		},
 	), nil
+}
+
+// multipathConnHandler wraps a Conn as the packet handler for one multipath
+// path's transport, tagging received packets with the path they arrived on.
+type multipathConnHandler struct {
+	*Conn
+	path ackhandler.PathID
+}
+
+func (h *multipathConnHandler) handlePacket(p receivedPacket) {
+	p.path = h.path
+	h.Conn.handlePacket(p)
+}
+
+type multipathAddRequest struct {
+	tr     *Transport
+	result chan multipathAddResult
+}
+
+type multipathAddResult struct {
+	id  ackhandler.PathID
+	err error
+}
+
+// AddMultipathPath adds a network path that the connection will send on
+// simultaneously with its existing path(s), in order to increase aggregate
+// throughput beyond a single network flow's bandwidth. It requires that
+// multipath was negotiated during the handshake (Config.EnableMultipath on both
+// endpoints).
+//
+// EXPERIMENTAL: the multipath data path has not been validated against a real
+// multi-path network. Path validation (PATH_CHALLENGE) is not yet performed;
+// the path is used optimistically. See MULTIPATH.md.
+func (c *Conn) AddMultipathPath(tr *Transport) error {
+	if c.multipath == nil {
+		return errors.New("multipath was not negotiated")
+	}
+	if c.perspective == protocol.PerspectiveServer {
+		return errors.New("only the client can add paths")
+	}
+	if err := tr.init(false); err != nil {
+		return err
+	}
+	req := &multipathAddRequest{tr: tr, result: make(chan multipathAddResult, 1)}
+	select {
+	case c.multipathAddQueue <- req:
+	case <-c.Context().Done():
+		return context.Cause(c.Context())
+	}
+	c.scheduleSending() // wake the run loop to process the request
+	select {
+	case res := <-req.result:
+		return res.err
+	case <-c.Context().Done():
+		return context.Cause(c.Context())
+	}
+}
+
+// addMultipathPathOnLoop performs the path setup on the run-loop goroutine,
+// where it is safe to touch the connection ID manager and sent-packet handler.
+func (c *Conn) addMultipathPathOnLoop(tr *Transport) (ackhandler.PathID, error) {
+	id, ok := c.multipath.addPath(tr, func(pid ackhandler.PathID) (protocol.ConnectionID, bool) {
+		return c.connIDManager.GetConnIDForPath(pathID(pid))
+	})
+	if !ok {
+		return 0, errors.New("cannot add path: negotiated path limit reached or no connection ID available")
+	}
+	// Route packets arriving on this path's transport to us, tagged with the path.
+	handler := &multipathConnHandler{Conn: c, path: id}
+	runner := (*packetHandlerMap)(tr)
+	c.connIDGenerator.AddConnRunner(
+		runner,
+		connRunnerCallbacks{
+			AddConnectionID:    func(connID protocol.ConnectionID) { runner.Add(connID, handler) },
+			RemoveConnectionID: runner.Remove,
+			ReplaceWithClosed:  runner.ReplaceWithClosed,
+		},
+	)
+	c.sentPacketHandler.AddPath(id)
+	// TODO: validate the path with a PATH_CHALLENGE before sending on it.
+	c.multipath.setValidated(id)
+	c.scheduleSending()
+	return id, nil
+}
+
+// drainMultipathAddQueue processes any pending AddMultipathPath requests.
+// It must be called on the run-loop goroutine.
+func (c *Conn) drainMultipathAddQueue() {
+	for {
+		select {
+		case req := <-c.multipathAddQueue:
+			id, err := c.addMultipathPathOnLoop(req.tr)
+			req.result <- multipathAddResult{id: id, err: err}
+		default:
+			return
+		}
+	}
 }
 
 // HandshakeComplete blocks until the handshake completes (or fails).
