@@ -13,6 +13,14 @@ type ReceivedPacketHandler struct {
 	initialPackets   *receivedPacketTracker
 	handshakePackets *receivedPacketTracker
 	appDataPackets   appDataReceivedPacketTracker
+	// appDataPaths holds the application-data received-packet tracker for each
+	// ADDITIONAL multipath path (the initial path uses appDataPackets directly).
+	// Each path generates its own ACKs over its own packet number space.
+	// Note: the initial path is intentionally not stored here, because the
+	// connection keeps the handler by value; an aliasing pointer into
+	// appDataPackets would dangle after that copy.
+	appDataPaths map[PathID]*appDataReceivedPacketTracker
+	logger       utils.Logger
 
 	lowest1RTTPacket protocol.PacketNumber
 }
@@ -22,6 +30,8 @@ func NewReceivedPacketHandler(logger utils.Logger) *ReceivedPacketHandler {
 		initialPackets:   newReceivedPacketTracker(),
 		handshakePackets: newReceivedPacketTracker(),
 		appDataPackets:   *newAppDataReceivedPacketTracker(logger),
+		logger:           logger,
+		appDataPaths:     make(map[PathID]*appDataReceivedPacketTracker),
 		lowest1RTTPacket: protocol.InvalidPacketNumber,
 	}
 }

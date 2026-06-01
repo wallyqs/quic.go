@@ -142,3 +142,38 @@ func TestPacketDuplicateDetection(t *testing.T) {
 	require.NoError(t, handler.ReceivedPacket(4, protocol.ECNNon, protocol.Encryption1RTT, sendTime, true))
 	require.True(t, handler.IsPotentiallyDuplicate(4, protocol.Encryption1RTT))
 }
+
+func TestReceivedPacketHandlerPerPath(t *testing.T) {
+	handler := NewReceivedPacketHandler(utils.DefaultLogger)
+	now := monotime.Now()
+
+	// unknown path: no per-path tracker yet
+	require.Nil(t, handler.GetAckFrameForPath(1, now, false))
+
+	handler.AddPath(1)
+
+	// a packet received on path 1 is tracked in path 1's space, independent of
+	// the initial path
+	require.NoError(t, handler.ReceivedPacketOnPath(1, 7, protocol.ECNNon, now, true))
+	require.NoError(t, handler.ReceivedPacketOnPath(InitialPathID, 3, protocol.ECNNon, now, true))
+
+	ack1 := handler.GetAckFrameForPath(1, now, false)
+	require.NotNil(t, ack1)
+	require.Equal(t, protocol.PacketNumber(7), ack1.LargestAcked())
+
+	ack0 := handler.GetAckFrameForPath(InitialPathID, now, false)
+	require.NotNil(t, ack0)
+	require.Equal(t, protocol.PacketNumber(3), ack0.LargestAcked())
+
+	// duplicate detection is per path
+	require.True(t, handler.IsPotentiallyDuplicateOnPath(1, 7))
+	require.False(t, handler.IsPotentiallyDuplicateOnPath(1, 8))
+
+	// removing the path drops its tracker
+	handler.RemovePath(1)
+	require.Nil(t, handler.GetAckFrameForPath(1, now, false))
+	// the initial path cannot be removed: it still tracks and acks packets
+	handler.RemovePath(InitialPathID)
+	require.NoError(t, handler.ReceivedPacketOnPath(InitialPathID, 9, protocol.ECNNon, now, true))
+	require.NotNil(t, handler.GetAckFrameForPath(InitialPathID, now, false))
+}

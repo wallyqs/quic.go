@@ -916,7 +916,7 @@ func (c *Conn) maybeResetTimer() {
 		return
 	}
 
-	if t := c.receivedPacketHandler.GetAlarmTimeout(); !t.IsZero() && t.Before(deadline) {
+	if t := c.receivedPacketHandler.GetAlarmTimeoutForAnyPath(); !t.IsZero() && t.Before(deadline) {
 		deadline = t
 	}
 	if t := c.sentPacketHandler.GetLossDetectionTimeout(); !t.IsZero() && t.Before(deadline) {
@@ -1256,7 +1256,7 @@ func (c *Conn) handleShortHeaderPacket(
 		wire.LogShortHeader(c.logger, destConnID, pn, pnLen, keyPhase)
 	}
 
-	if c.receivedPacketHandler.IsPotentiallyDuplicate(pn, protocol.Encryption1RTT) {
+	if c.receivedPacketHandler.IsPotentiallyDuplicateOnPath(p.path, pn) {
 		c.logger.Debugf("Dropping (potentially) duplicate packet.")
 		if c.qlogger != nil {
 			c.qlogger.RecordEvent(qlog.PacketDropped{
@@ -1292,7 +1292,7 @@ func (c *Conn) handleShortHeaderPacket(
 			})
 		}
 	}
-	isNonProbing, pathChallenge, err := c.handleUnpackedShortHeaderPacket(destConnID, pn, data, p.ecn, p.rcvTime, log)
+	isNonProbing, pathChallenge, err := c.handleUnpackedShortHeaderPacket(destConnID, p.path, pn, data, p.ecn, p.rcvTime, log)
 	if err != nil {
 		return false, err
 	}
@@ -1784,6 +1784,7 @@ func (c *Conn) handleUnpackedLongHeaderPacket(
 
 func (c *Conn) handleUnpackedShortHeaderPacket(
 	destConnID protocol.ConnectionID,
+	path ackhandler.PathID,
 	pn protocol.PacketNumber,
 	data []byte,
 	ecn protocol.ECN,
@@ -1799,7 +1800,9 @@ func (c *Conn) handleUnpackedShortHeaderPacket(
 		return false, nil, err
 	}
 	c.sentPacketHandler.ReceivedPacket(protocol.Encryption1RTT, rcvTime)
-	if err := c.receivedPacketHandler.ReceivedPacket(pn, ecn, protocol.Encryption1RTT, rcvTime, isAckEliciting); err != nil {
+	// On an additional multipath path, track the received packet against that
+	// path's packet number space so we generate a correct per-path ACK.
+	if err := c.receivedPacketHandler.ReceivedPacketOnPath(path, pn, ecn, rcvTime, isAckEliciting); err != nil {
 		return false, nil, err
 	}
 	return isNonProbing, pathChallenge, nil
@@ -3294,6 +3297,7 @@ func (c *Conn) addMultipathPathOnLoop(tr *Transport) (ackhandler.PathID, error) 
 		},
 	)
 	c.sentPacketHandler.AddPath(id)
+	c.receivedPacketHandler.AddPath(id)
 	// TODO: validate the path with a PATH_CHALLENGE before sending on it.
 	c.multipath.setValidated(id)
 	c.scheduleSending()
